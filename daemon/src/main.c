@@ -26,6 +26,7 @@
 #define SAR0_MODE "/sys/class/leds/sar0/mode_operation"
 #define SAR1_MODE "/sys/class/leds/sar1/mode_operation"
 #define CONFIG_PATH "/data/adb/redmagic_trigger_bridge/config.conf"
+#define ACTIVE_PATH "/data/adb/redmagic_trigger_bridge/active"
 #define NORMALIZED_MAX 10000
 #define SLOT_LEFT 0
 #define SLOT_RIGHT 1
@@ -50,15 +51,25 @@ struct bridge {
     int x_max;
     int y_max;
     bool down[2];
+    bool active;
+    bool grabbed;
+    int original_mode[2];
+    bool original_mode_valid[2];
     int tracking_id[2];
     struct config config;
 };
 
 static volatile sig_atomic_t stop_requested;
+static volatile sig_atomic_t reload_requested;
 
-static void handle_signal(int signal_number) {
+static void handle_stop_signal(int signal_number) {
     (void)signal_number;
     stop_requested = 1;
+}
+
+static void handle_reload_signal(int signal_number) {
+    (void)signal_number;
+    reload_requested = 1;
 }
 
 static void log_message(const char *level, const char *message) {
@@ -238,6 +249,21 @@ static bool write_text(const char *path, const char *value) {
     return written == (ssize_t)length;
 }
 
+static bool read_mode(const char *path, int *mode) {
+    char value[128];
+    if (!read_line(path, value, sizeof(value))) {
+        return false;
+    }
+
+    int parsed = -1;
+    if (sscanf(value, "mode : %d", &parsed) != 1 ||
+        (parsed != 0 && parsed != 1)) {
+        return false;
+    }
+    *mode = parsed;
+    return true;
+}
+
 static int configure_uinput(struct bridge *bridge) {
     struct input_absinfo x_info;
     struct input_absinfo y_info;
@@ -398,6 +424,68 @@ static void release_contacts(struct bridge *bridge) {
     send_contact(bridge, SLOT_RIGHT, false);
 }
 
+static void deactivate_bridge(struct bridge *bridge) {
+    release_contacts(bridge);
+
+    if (bridge->grabbed) {
+        ioctl(bridge->sar0_fd, EVIOCGRAB, 0);
+        ioctl(bridge->sar1_fd, EVIOCGRAB, 0);
+        bridge->grabbed = false;
+    }
+
+    const char *mode_paths[2] = {SAR0_MODE, SAR1_MODE};
+    for (int index = 0; index < 2; ++index) {
+        if (!bridge->original_mode_valid[index]) {
+            continue;
+        }
+        const char *value = bridge->original_mode[index] == 0 ? "0\n" : "1\n";
+        if (!write_text(mode_paths[index], value)) {
+            log_message("WARN", "unable to restore trigger hardware mode");
+        }
+        bridge->original_mode_valid[index] = false;
+    }
+
+    if (bridge->active) {
+        log_message("INFO", "trigger bridge deactivated");
+    }
+    bridge->active = false;
+}
+
+static bool activate_bridge(struct bridge *bridge) {
+    if (bridge->active) {
+        return true;
+    }
+
+    bridge->original_mode_valid[0] = read_mode(SAR0_MODE,
+                                                &bridge->original_mode[0]);
+    bridge->original_mode_valid[1] = read_mode(SAR1_MODE,
+                                                &bridge->original_mode[1]);
+
+    if (!write_text(SAR0_MODE, "1\n") || !write_text(SAR1_MODE, "1\n")) {
+        log_message("ERROR", "unable to arm shoulder-trigger hardware");
+        deactivate_bridge(bridge);
+        return false;
+    }
+
+    if (bridge->config.grab_devices) {
+        if (ioctl(bridge->sar0_fd, EVIOCGRAB, 1) < 0) {
+            log_message("ERROR", "unable to grab SAR0 trigger device");
+            deactivate_bridge(bridge);
+            return false;
+        }
+        bridge->grabbed = true;
+        if (ioctl(bridge->sar1_fd, EVIOCGRAB, 1) < 0) {
+            log_message("ERROR", "unable to grab SAR1 trigger device");
+            deactivate_bridge(bridge);
+            return false;
+        }
+    }
+
+    bridge->active = true;
+    log_message("INFO", "trigger bridge activated");
+    return true;
+}
+
 static void process_input(struct bridge *bridge, int fd, int expected_code,
                           int configured_slot) {
     struct input_event events[16];
@@ -409,25 +497,18 @@ static void process_input(struct bridge *bridge, int fd, int expected_code,
     size_t count = (size_t)bytes / sizeof(events[0]);
     int slot = bridge->config.swap_triggers ? 1 - configured_slot : configured_slot;
     for (size_t index = 0; index < count; ++index) {
-        if (events[index].type == EV_KEY && events[index].code == expected_code) {
+        if (bridge->active && events[index].type == EV_KEY &&
+            events[index].code == expected_code) {
             send_contact(bridge, slot, events[index].value != 0);
         }
     }
 }
 
 static void close_bridge(struct bridge *bridge) {
+    deactivate_bridge(bridge);
     if (bridge->uinput_fd >= 0) {
-        release_contacts(bridge);
         ioctl(bridge->uinput_fd, UI_DEV_DESTROY);
         close(bridge->uinput_fd);
-    }
-    if (bridge->config.grab_devices) {
-        if (bridge->sar0_fd >= 0) {
-            ioctl(bridge->sar0_fd, EVIOCGRAB, 0);
-        }
-        if (bridge->sar1_fd >= 0) {
-            ioctl(bridge->sar1_fd, EVIOCGRAB, 0);
-        }
     }
     if (bridge->sar0_fd >= 0) close(bridge->sar0_fd);
     if (bridge->sar1_fd >= 0) close(bridge->sar1_fd);
@@ -453,24 +534,11 @@ int main(void) {
         return EXIT_SUCCESS;
     }
 
-    if (!write_text(SAR0_MODE, "1\n") || !write_text(SAR1_MODE, "1\n")) {
-        log_message("ERROR", "unable to arm shoulder-trigger hardware");
-        return EXIT_FAILURE;
-    }
-
     bridge.sar0_fd = find_input_device(SAR0_NAME);
     bridge.sar1_fd = find_input_device(SAR1_NAME);
     bridge.touch_fd = find_input_device(TOUCH_NAME);
     if (bridge.sar0_fd < 0 || bridge.sar1_fd < 0 || bridge.touch_fd < 0) {
         log_message("ERROR", "required input device was not found");
-        close_bridge(&bridge);
-        return EXIT_FAILURE;
-    }
-
-    if (bridge.config.grab_devices &&
-        (ioctl(bridge.sar0_fd, EVIOCGRAB, 1) < 0 ||
-         ioctl(bridge.sar1_fd, EVIOCGRAB, 1) < 0)) {
-        log_message("ERROR", "unable to exclusively grab trigger devices");
         close_bridge(&bridge);
         return EXIT_FAILURE;
     }
@@ -481,18 +549,40 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    signal(SIGINT, handle_signal);
-    signal(SIGTERM, handle_signal);
-    signal(SIGHUP, handle_signal);
-    log_message("INFO", "trigger bridge started");
+    signal(SIGINT, handle_stop_signal);
+    signal(SIGTERM, handle_stop_signal);
+    signal(SIGHUP, handle_reload_signal);
+    signal(SIGUSR1, handle_reload_signal);
+    log_message("INFO", "trigger bridge started inactive");
 
     struct pollfd poll_fds[2] = {
         {.fd = bridge.sar0_fd, .events = POLLIN},
         {.fd = bridge.sar1_fd, .events = POLLIN},
     };
+    time_t next_activation_attempt = 0;
 
     while (!stop_requested) {
-        int result = poll(poll_fds, 2, 1000);
+        if (reload_requested) {
+            deactivate_bridge(&bridge);
+            load_config(&bridge.config);
+            next_activation_attempt = 0;
+            reload_requested = 0;
+        }
+
+        bool should_be_active = bridge.config.enabled &&
+                                access(ACTIVE_PATH, F_OK) == 0;
+        time_t now = time(NULL);
+        if (should_be_active && !bridge.active &&
+            now >= next_activation_attempt) {
+            if (!activate_bridge(&bridge)) {
+                next_activation_attempt = now + 2;
+            }
+        } else if (!should_be_active && bridge.active) {
+            deactivate_bridge(&bridge);
+            next_activation_attempt = 0;
+        }
+
+        int result = poll(poll_fds, 2, 250);
         if (result < 0) {
             if (errno == EINTR) {
                 continue;
