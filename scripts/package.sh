@@ -16,9 +16,10 @@ mkdir -p "$staging/bin" "$output_dir"
 cp -a "$project_root/module/." "$staging/"
 cp "$binary" "$staging/bin/redmagic-trigger-bridge"
 chmod 0755 "$staging/bin/redmagic-trigger-bridge" \
-    "$staging/service.sh" "$staging/uninstall.sh"
+    "$staging/service.sh" "$staging/uninstall.sh" \
+    "$staging/bridge-control.sh" "$staging/action.sh"
 
-archive="$output_dir/Redmagic-Trigger-Bridge-v0.1.0-dev.zip"
+archive="$output_dir/Redmagic-Trigger-Bridge-v0.2.0-dev.zip"
 rm -f "$archive"
 (
     cd "$staging"
