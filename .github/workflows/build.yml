@@ -3,6 +3,7 @@ name: Build trigger bridge module
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -45,5 +46,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Redmagic-Trigger-Bridge-module
-          path: out/Redmagic-Trigger-Bridge-*.zip
+          path: out/Redmagic-Trigger-Bridge-v*.zip*
           if-no-files-found: error

@@ -43,6 +43,10 @@ remain useful to Redmagic 11 Toolbox on stock, but the bridge daemon deliberatel
 does not depend on them. Its path is evdev -> uinput, which can also operate on a
 custom ROM retaining the vendor/kernel trigger devices.
 
+That compatibility statement describes the required architecture. Version
+0.2.0 has been validated on stock Android 16; end-to-end automatic fallback on
+an actual custom ROM remains pending.
+
 ## Shutdown invariant
 
 Every active virtual slot must receive `ABS_MT_TRACKING_ID=-1`, followed by the

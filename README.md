@@ -21,12 +21,14 @@ current `event4`, `event5`, or `event9` numbering remains stable.
 
 ## Status
 
-Development preview. Raw F7/F8 events, simultaneous holds, direct SAR arming,
-and uinput availability have been verified on an NX809J running stock Android
-16 with KernelSU. The native daemon has also produced verified independent and
-simultaneous virtual multitouch contacts through `/dev/uinput`.
+Version 0.2.0 is the first public release candidate. Raw F7/F8 events,
+simultaneous holds, direct SAR arming, uinput availability, inactive-by-default
+startup, explicit activation, and forced contact release have been verified on
+an NX809J running stock Android 16 with KernelSU 3.3.0. The module remained
+installed and enabled without interfering while Redmagic 11 Toolbox selected
+the stock native TGK backend.
 
-The first release will include:
+The release includes:
 
 - an arm64 Android daemon using two fixed multitouch slots;
 - inactive-by-default ownership controlled explicitly by Toolbox;
@@ -35,6 +37,36 @@ The first release will include:
 - optional exclusive grabs to prevent duplicate stock handling;
 - KernelSU, Magisk, and APatch-compatible packaging;
 - a GitHub Actions build producing a flashable module ZIP.
+
+The automatic fallback path is implemented in Redmagic 11 Toolbox, but it has
+not yet been exercised end to end on a custom ROM that lacks native TGK. For
+that reason, the GitHub release is marked as a prerelease even though the module
+metadata uses the final `0.2.0` version.
+
+## Installation
+
+1. Download `Redmagic-Trigger-Bridge-v0.2.0.zip` from the GitHub release.
+   Verify it against the adjacent `.sha256` file.
+2. Install it from KernelSU, Magisk, or APatch.
+3. Reboot once.
+4. Leave the module enabled. Redmagic 11 Toolbox activates it only when native
+   TGK is unavailable and a configured game owns the foreground.
+
+Do not manually activate the bridge during normal Toolbox use. The module
+manager action button and `bridge-control.sh` commands are retained for
+diagnostics and development testing.
+
+## Compatibility boundary
+
+- Device support is intentionally restricted to `NX809J`.
+- Stock firmware continues to use native TGK when that backend applies and
+  verifies successfully.
+- A custom ROM must retain the NX809J SAR input devices, writable trigger-mode
+  nodes, the Synaptics touchscreen input description, `/dev/uinput`, and SELinux
+  access compatible with its root implementation.
+- The fallback supplies independent touch contacts. It does not reproduce
+  native TGK haptics, rapid-fire modes, or system-server visual effects.
+- Root is required. This is not a generic Android trigger module.
 
 ## Safety model
 
@@ -52,6 +84,9 @@ configured game enters or leaves the foreground.
 
 See [`docs/CONTROL.md`](docs/CONTROL.md) for the command interface and Toolbox
 integration contract.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for release history and
+[`docs/HARDWARE.md`](docs/HARDWARE.md) for the verified device interfaces.
 
 ## Attribution
 

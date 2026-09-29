@@ -47,6 +47,11 @@ session:
    down.
 5. Make `off` part of every cleanup/error path. It is safe and idempotent.
 
+On stock firmware, Toolbox prefers native TGK and keeps this bridge inactive.
+Module installation or enablement in a root manager does not imply active input
+ownership. The bridge is selected only when native TGK cannot be applied and
+verified.
+
 The module removes the active marker on a fresh boot or root-service restart.
 If the daemon alone crashes during an active gameplay session, the supervisor
 may restart it and the retained marker allows recovery. A full service restart
