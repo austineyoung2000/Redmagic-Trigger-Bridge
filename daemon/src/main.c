@@ -30,6 +30,8 @@
 #define NORMALIZED_MAX 10000
 #define SLOT_LEFT 0
 #define SLOT_RIGHT 1
+#define TRIGGER_SLOT_COUNT 2
+#define MAX_PHYSICAL_SLOTS 32
 
 struct point {
     int x;
@@ -51,8 +53,16 @@ struct bridge {
     int x_max;
     int y_max;
     bool down[2];
+    bool physical_down[MAX_PHYSICAL_SLOTS];
+    int physical_tracking_id[MAX_PHYSICAL_SLOTS];
+    int physical_slot;
+    int physical_slot_count;
+    bool physical_touch_down;
+    bool combined_touch_down;
     bool active;
-    bool grabbed;
+    bool sar0_grabbed;
+    bool sar1_grabbed;
+    bool touch_grabbed;
     int original_mode[2];
     bool original_mode_valid[2];
     int tracking_id[2];
@@ -267,12 +277,23 @@ static bool read_mode(const char *path, int *mode) {
 static int configure_uinput(struct bridge *bridge) {
     struct input_absinfo x_info;
     struct input_absinfo y_info;
+    struct input_absinfo slot_info;
     if (ioctl(bridge->touch_fd, EVIOCGABS(ABS_MT_POSITION_X), &x_info) < 0 ||
-        ioctl(bridge->touch_fd, EVIOCGABS(ABS_MT_POSITION_Y), &y_info) < 0) {
+        ioctl(bridge->touch_fd, EVIOCGABS(ABS_MT_POSITION_Y), &y_info) < 0 ||
+        ioctl(bridge->touch_fd, EVIOCGABS(ABS_MT_SLOT), &slot_info) < 0) {
         return -1;
     }
+
+    int physical_slot_count = slot_info.maximum - slot_info.minimum + 1;
+    if (slot_info.minimum != 0 || physical_slot_count <= 0 ||
+        physical_slot_count > MAX_PHYSICAL_SLOTS) {
+        errno = ERANGE;
+        return -1;
+    }
+
     bridge->x_max = x_info.maximum;
     bridge->y_max = y_info.maximum;
+    bridge->physical_slot_count = physical_slot_count;
 
     int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0) {
@@ -288,14 +309,17 @@ static int configure_uinput(struct bridge *bridge) {
     }
 
     if (ioctl(fd, UI_SET_KEYBIT, BTN_TOUCH) < 0 ||
+        ioctl(fd, UI_SET_KEYBIT, BTN_TOOL_FINGER) < 0 ||
+        ioctl(fd, UI_SET_KEYBIT, KEY_WAKEUP) < 0 ||
         ioctl(fd, UI_SET_PROPBIT, INPUT_PROP_DIRECT) < 0) {
         close(fd);
         return -1;
     }
 
     int axes[] = {ABS_X, ABS_Y, ABS_MT_SLOT, ABS_MT_TRACKING_ID,
+                  ABS_MT_TOUCH_MAJOR, ABS_MT_TOUCH_MINOR,
                   ABS_MT_POSITION_X, ABS_MT_POSITION_Y,
-                  ABS_MT_TOUCH_MAJOR, ABS_MT_PRESSURE};
+                  ABS_MT_PRESSURE};
     for (size_t index = 0; index < sizeof(axes) / sizeof(axes[0]); ++index) {
         if (ioctl(fd, UI_SET_ABSBIT, axes[index]) < 0) {
             close(fd);
@@ -310,20 +334,25 @@ static int configure_uinput(struct bridge *bridge) {
     device.id.vendor = 0x19d2;
     device.id.product = 0x8091;
     device.id.version = 1;
-    device.absmin[ABS_X] = 0;
-    device.absmax[ABS_X] = bridge->x_max;
-    device.absmin[ABS_Y] = 0;
-    device.absmax[ABS_Y] = bridge->y_max;
+    int mirrored_axes[] = {ABS_X, ABS_Y, ABS_MT_TOUCH_MAJOR,
+                           ABS_MT_TOUCH_MINOR, ABS_MT_POSITION_X,
+                           ABS_MT_POSITION_Y};
+    for (size_t index = 0;
+         index < sizeof(mirrored_axes) / sizeof(mirrored_axes[0]); ++index) {
+        int code = mirrored_axes[index];
+        struct input_absinfo info;
+        if (ioctl(bridge->touch_fd, EVIOCGABS(code), &info) == 0) {
+            device.absmin[code] = info.minimum;
+            device.absmax[code] = info.maximum;
+            device.absfuzz[code] = info.fuzz;
+            device.absflat[code] = info.flat;
+        }
+    }
     device.absmin[ABS_MT_SLOT] = 0;
-    device.absmax[ABS_MT_SLOT] = 1;
+    device.absmax[ABS_MT_SLOT] = physical_slot_count +
+                                 TRIGGER_SLOT_COUNT - 1;
     device.absmin[ABS_MT_TRACKING_ID] = 0;
     device.absmax[ABS_MT_TRACKING_ID] = 65535;
-    device.absmin[ABS_MT_POSITION_X] = 0;
-    device.absmax[ABS_MT_POSITION_X] = bridge->x_max;
-    device.absmin[ABS_MT_POSITION_Y] = 0;
-    device.absmax[ABS_MT_POSITION_Y] = bridge->y_max;
-    device.absmin[ABS_MT_TOUCH_MAJOR] = 0;
-    device.absmax[ABS_MT_TOUCH_MAJOR] = 255;
     device.absmin[ABS_MT_PRESSURE] = 0;
     device.absmax[ABS_MT_PRESSURE] = 255;
 
@@ -338,6 +367,15 @@ static int configure_uinput(struct bridge *bridge) {
     return 0;
 }
 
+static void destroy_uinput(struct bridge *bridge) {
+    if (bridge->uinput_fd < 0) {
+        return;
+    }
+    ioctl(bridge->uinput_fd, UI_DEV_DESTROY);
+    close(bridge->uinput_fd);
+    bridge->uinput_fd = -1;
+}
+
 static bool emit_event(int fd, uint16_t type, uint16_t code, int32_t value) {
     struct input_event event;
     memset(&event, 0, sizeof(event));
@@ -345,6 +383,38 @@ static bool emit_event(int fd, uint16_t type, uint16_t code, int32_t value) {
     event.code = code;
     event.value = value;
     return write(fd, &event, sizeof(event)) == (ssize_t)sizeof(event);
+}
+
+static void reset_touch_state(struct bridge *bridge) {
+    memset(bridge->physical_down, 0, sizeof(bridge->physical_down));
+    for (int slot = 0; slot < MAX_PHYSICAL_SLOTS; ++slot) {
+        bridge->physical_tracking_id[slot] = -1;
+    }
+    bridge->physical_slot = 0;
+    bridge->physical_touch_down = false;
+    bridge->combined_touch_down = false;
+    bridge->down[SLOT_LEFT] = false;
+    bridge->down[SLOT_RIGHT] = false;
+}
+
+static void drain_input(int fd) {
+    struct input_event events[32];
+    while (read(fd, events, sizeof(events)) > 0) {
+    }
+}
+
+static bool any_trigger_down(const struct bridge *bridge) {
+    return bridge->down[SLOT_LEFT] || bridge->down[SLOT_RIGHT];
+}
+
+static void emit_combined_touch_state(struct bridge *bridge) {
+    bool wanted = bridge->physical_touch_down || any_trigger_down(bridge);
+    if (bridge->combined_touch_down == wanted) {
+        return;
+    }
+    emit_event(bridge->uinput_fd, EV_KEY, BTN_TOOL_FINGER, wanted ? 1 : 0);
+    emit_event(bridge->uinput_fd, EV_KEY, BTN_TOUCH, wanted ? 1 : 0);
+    bridge->combined_touch_down = wanted;
 }
 
 static int current_rotation(void) {
@@ -386,36 +456,47 @@ static struct point raw_point(const struct bridge *bridge, int slot) {
     return result;
 }
 
+static void emit_trigger_primary_position(struct bridge *bridge) {
+    if (bridge->physical_touch_down) {
+        return;
+    }
+
+    int slot = bridge->down[SLOT_LEFT] ? SLOT_LEFT :
+               bridge->down[SLOT_RIGHT] ? SLOT_RIGHT : -1;
+    if (slot < 0) {
+        return;
+    }
+
+    struct point point = raw_point(bridge, slot);
+    emit_event(bridge->uinput_fd, EV_ABS, ABS_X, point.x);
+    emit_event(bridge->uinput_fd, EV_ABS, ABS_Y, point.y);
+}
+
 static void send_contact(struct bridge *bridge, int slot, bool pressed) {
+    if (bridge->uinput_fd < 0) {
+        return;
+    }
     if (bridge->down[slot] == pressed) {
         return;
     }
 
-    emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_SLOT, slot);
+    int virtual_slot = bridge->physical_slot_count + slot;
+    emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_SLOT, virtual_slot);
     if (pressed) {
         struct point point = raw_point(bridge, slot);
-        int tracking_id = ++bridge->tracking_id[slot];
-        if (tracking_id <= 0) {
-            tracking_id = slot + 1;
-            bridge->tracking_id[slot] = tracking_id;
-        }
+        int tracking_id = 65535 - slot;
+        bridge->tracking_id[slot] = tracking_id;
         emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_TRACKING_ID, tracking_id);
         emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_POSITION_X, point.x);
         emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_POSITION_Y, point.y);
         emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_TOUCH_MAJOR, 32);
         emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_PRESSURE, 128);
-        emit_event(bridge->uinput_fd, EV_ABS, ABS_X, point.x);
-        emit_event(bridge->uinput_fd, EV_ABS, ABS_Y, point.y);
-        if (!bridge->down[SLOT_LEFT] && !bridge->down[SLOT_RIGHT]) {
-            emit_event(bridge->uinput_fd, EV_KEY, BTN_TOUCH, 1);
-        }
     } else {
         emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_TRACKING_ID, -1);
-        if (!bridge->down[1 - slot]) {
-            emit_event(bridge->uinput_fd, EV_KEY, BTN_TOUCH, 0);
-        }
     }
     bridge->down[slot] = pressed;
+    emit_trigger_primary_position(bridge);
+    emit_combined_touch_state(bridge);
     emit_event(bridge->uinput_fd, EV_SYN, SYN_REPORT, 0);
 }
 
@@ -424,14 +505,92 @@ static void release_contacts(struct bridge *bridge) {
     send_contact(bridge, SLOT_RIGHT, false);
 }
 
+static void release_physical_contacts(struct bridge *bridge) {
+    if (bridge->uinput_fd < 0) {
+        return;
+    }
+    for (int slot = 0; slot < bridge->physical_slot_count; ++slot) {
+        if (!bridge->physical_down[slot]) {
+            continue;
+        }
+        emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_SLOT, slot);
+        emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_TRACKING_ID, -1);
+        bridge->physical_down[slot] = false;
+        bridge->physical_tracking_id[slot] = -1;
+    }
+    bridge->physical_touch_down = false;
+    emit_combined_touch_state(bridge);
+    emit_event(bridge->uinput_fd, EV_SYN, SYN_REPORT, 0);
+}
+
+static void process_touch_input(struct bridge *bridge) {
+    struct input_event events[32];
+    ssize_t bytes = read(bridge->touch_fd, events, sizeof(events));
+    if (bytes <= 0 || !bridge->active || bridge->uinput_fd < 0) {
+        return;
+    }
+
+    size_t count = (size_t)bytes / sizeof(events[0]);
+    for (size_t index = 0; index < count; ++index) {
+        struct input_event event = events[index];
+
+        if (event.type == EV_ABS && event.code == ABS_MT_SLOT) {
+            if (event.value < 0 || event.value >= bridge->physical_slot_count) {
+                continue;
+            }
+            bridge->physical_slot = event.value;
+            emit_event(bridge->uinput_fd, event.type, event.code, event.value);
+            continue;
+        }
+
+        if (event.type == EV_ABS && event.code == ABS_MT_TRACKING_ID) {
+            int slot = bridge->physical_slot;
+            if (slot >= 0 && slot < bridge->physical_slot_count) {
+                bridge->physical_down[slot] = event.value >= 0;
+                bridge->physical_tracking_id[slot] = event.value;
+            }
+            emit_event(bridge->uinput_fd, event.type, event.code, event.value);
+            continue;
+        }
+
+        if (event.type == EV_KEY &&
+            (event.code == BTN_TOUCH || event.code == BTN_TOOL_FINGER)) {
+            if (event.code == BTN_TOUCH) {
+                bridge->physical_touch_down = event.value != 0;
+            }
+            continue;
+        }
+
+        if (event.type == EV_SYN && event.code == SYN_REPORT) {
+            emit_trigger_primary_position(bridge);
+            emit_combined_touch_state(bridge);
+            emit_event(bridge->uinput_fd, EV_SYN, SYN_REPORT, 0);
+            continue;
+        }
+
+        emit_event(bridge->uinput_fd, event.type, event.code, event.value);
+    }
+}
+
 static void deactivate_bridge(struct bridge *bridge) {
     release_contacts(bridge);
+    release_physical_contacts(bridge);
 
-    if (bridge->grabbed) {
-        ioctl(bridge->sar0_fd, EVIOCGRAB, 0);
-        ioctl(bridge->sar1_fd, EVIOCGRAB, 0);
-        bridge->grabbed = false;
+    if (bridge->touch_grabbed) {
+        ioctl(bridge->touch_fd, EVIOCGRAB, 0);
+        bridge->touch_grabbed = false;
     }
+    if (bridge->sar1_grabbed) {
+        ioctl(bridge->sar1_fd, EVIOCGRAB, 0);
+        bridge->sar1_grabbed = false;
+    }
+    if (bridge->sar0_grabbed) {
+        ioctl(bridge->sar0_fd, EVIOCGRAB, 0);
+        bridge->sar0_grabbed = false;
+    }
+
+    destroy_uinput(bridge);
+    reset_touch_state(bridge);
 
     const char *mode_paths[2] = {SAR0_MODE, SAR1_MODE};
     for (int index = 0; index < 2; ++index) {
@@ -456,6 +615,11 @@ static bool activate_bridge(struct bridge *bridge) {
         return true;
     }
 
+    if (!bridge->config.grab_devices) {
+        log_message("ERROR", "merged touch proxy requires grab_devices=1");
+        return false;
+    }
+
     bridge->original_mode_valid[0] = read_mode(SAR0_MODE,
                                                 &bridge->original_mode[0]);
     bridge->original_mode_valid[1] = read_mode(SAR1_MODE,
@@ -467,22 +631,38 @@ static bool activate_bridge(struct bridge *bridge) {
         return false;
     }
 
-    if (bridge->config.grab_devices) {
-        if (ioctl(bridge->sar0_fd, EVIOCGRAB, 1) < 0) {
-            log_message("ERROR", "unable to grab SAR0 trigger device");
-            deactivate_bridge(bridge);
-            return false;
-        }
-        bridge->grabbed = true;
-        if (ioctl(bridge->sar1_fd, EVIOCGRAB, 1) < 0) {
-            log_message("ERROR", "unable to grab SAR1 trigger device");
-            deactivate_bridge(bridge);
-            return false;
-        }
+    drain_input(bridge->touch_fd);
+    drain_input(bridge->sar0_fd);
+    drain_input(bridge->sar1_fd);
+    reset_touch_state(bridge);
+
+    if (configure_uinput(bridge) < 0) {
+        log_message("ERROR", "unable to create merged virtual touchscreen");
+        deactivate_bridge(bridge);
+        return false;
     }
 
+    if (ioctl(bridge->sar0_fd, EVIOCGRAB, 1) < 0) {
+        log_message("ERROR", "unable to grab SAR0 trigger device");
+        deactivate_bridge(bridge);
+        return false;
+    }
+    bridge->sar0_grabbed = true;
+    if (ioctl(bridge->sar1_fd, EVIOCGRAB, 1) < 0) {
+        log_message("ERROR", "unable to grab SAR1 trigger device");
+        deactivate_bridge(bridge);
+        return false;
+    }
+    bridge->sar1_grabbed = true;
+    if (ioctl(bridge->touch_fd, EVIOCGRAB, 1) < 0) {
+        log_message("ERROR", "unable to grab physical touchscreen");
+        deactivate_bridge(bridge);
+        return false;
+    }
+    bridge->touch_grabbed = true;
+
     bridge->active = true;
-    log_message("INFO", "trigger bridge activated");
+    log_message("INFO", "trigger bridge activated with merged touch proxy");
     return true;
 }
 
@@ -506,10 +686,7 @@ static void process_input(struct bridge *bridge, int fd, int expected_code,
 
 static void close_bridge(struct bridge *bridge) {
     deactivate_bridge(bridge);
-    if (bridge->uinput_fd >= 0) {
-        ioctl(bridge->uinput_fd, UI_DEV_DESTROY);
-        close(bridge->uinput_fd);
-    }
+    destroy_uinput(bridge);
     if (bridge->sar0_fd >= 0) close(bridge->sar0_fd);
     if (bridge->sar1_fd >= 0) close(bridge->sar1_fd);
     if (bridge->touch_fd >= 0) close(bridge->touch_fd);
@@ -522,6 +699,7 @@ int main(void) {
     bridge.sar1_fd = -1;
     bridge.touch_fd = -1;
     bridge.uinput_fd = -1;
+    reset_touch_state(&bridge);
 
     if (!is_supported_device()) {
         log_message("ERROR", "unsupported device; expected NX809J");
@@ -543,21 +721,16 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    if (configure_uinput(&bridge) < 0) {
-        log_message("ERROR", "unable to create virtual touchscreen");
-        close_bridge(&bridge);
-        return EXIT_FAILURE;
-    }
-
     signal(SIGINT, handle_stop_signal);
     signal(SIGTERM, handle_stop_signal);
     signal(SIGHUP, handle_reload_signal);
     signal(SIGUSR1, handle_reload_signal);
-    log_message("INFO", "trigger bridge started inactive");
+    log_message("INFO", "trigger bridge started inactive without virtual touch");
 
-    struct pollfd poll_fds[2] = {
+    struct pollfd poll_fds[3] = {
         {.fd = bridge.sar0_fd, .events = POLLIN},
         {.fd = bridge.sar1_fd, .events = POLLIN},
+        {.fd = bridge.touch_fd, .events = POLLIN},
     };
     time_t next_activation_attempt = 0;
 
@@ -582,7 +755,7 @@ int main(void) {
             next_activation_attempt = 0;
         }
 
-        int result = poll(poll_fds, 2, 250);
+        int result = poll(poll_fds, 3, 250);
         if (result < 0) {
             if (errno == EINTR) {
                 continue;
@@ -591,8 +764,9 @@ int main(void) {
             break;
         }
         if ((poll_fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 ||
-            (poll_fds[1].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-            log_message("ERROR", "trigger input device disconnected");
+            (poll_fds[1].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 ||
+            (poll_fds[2].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+            log_message("ERROR", "required input device disconnected");
             break;
         }
         if ((poll_fds[0].revents & POLLIN) != 0) {
@@ -600,6 +774,9 @@ int main(void) {
         }
         if ((poll_fds[1].revents & POLLIN) != 0) {
             process_input(&bridge, bridge.sar1_fd, KEY_F8, SLOT_RIGHT);
+        }
+        if ((poll_fds[2].revents & POLLIN) != 0) {
+            process_touch_input(&bridge);
         }
     }
 
