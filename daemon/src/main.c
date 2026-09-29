@@ -320,8 +320,7 @@ static int configure_uinput(struct bridge *bridge) {
 
     int axes[] = {ABS_X, ABS_Y, ABS_MT_SLOT, ABS_MT_TRACKING_ID,
                   ABS_MT_TOUCH_MAJOR, ABS_MT_TOUCH_MINOR,
-                  ABS_MT_POSITION_X, ABS_MT_POSITION_Y,
-                  ABS_MT_PRESSURE};
+                  ABS_MT_POSITION_X, ABS_MT_POSITION_Y};
     for (size_t index = 0; index < sizeof(axes) / sizeof(axes[0]); ++index) {
         if (ioctl(fd, UI_SET_ABSBIT, axes[index]) < 0) {
             close(fd);
@@ -355,8 +354,6 @@ static int configure_uinput(struct bridge *bridge) {
                                  TRIGGER_SLOT_COUNT - 1;
     device.absmin[ABS_MT_TRACKING_ID] = 0;
     device.absmax[ABS_MT_TRACKING_ID] = 65535;
-    device.absmin[ABS_MT_PRESSURE] = 0;
-    device.absmax[ABS_MT_PRESSURE] = 255;
 
     if (write(fd, &device, sizeof(device)) != (ssize_t)sizeof(device) ||
         ioctl(fd, UI_DEV_CREATE) < 0) {
@@ -518,7 +515,6 @@ static void send_contact(struct bridge *bridge, int slot, bool pressed) {
         emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_POSITION_X, point.x);
         emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_POSITION_Y, point.y);
         emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_TOUCH_MAJOR, 32);
-        emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_PRESSURE, 128);
     } else {
         emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_TRACKING_ID, -1);
     }
