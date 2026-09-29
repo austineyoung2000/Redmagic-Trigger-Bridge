@@ -21,13 +21,15 @@ current `event4`, `event5`, or `event9` numbering remains stable.
 
 ## Status
 
-Initial development scaffold. Raw F7/F8 events, simultaneous holds, direct SAR
-arming, and uinput availability have been verified on an NX809J running stock
-Android 16 with KernelSU.
+Development preview. Raw F7/F8 events, simultaneous holds, direct SAR arming,
+and uinput availability have been verified on an NX809J running stock Android
+16 with KernelSU. The native daemon has also produced verified independent and
+simultaneous virtual multitouch contacts through `/dev/uinput`.
 
 The first release will include:
 
 - an arm64 Android daemon using two fixed multitouch slots;
+- inactive-by-default ownership controlled explicitly by Toolbox;
 - safe touch release during shutdown and input-device reconnects;
 - normalized per-rotation target coordinates;
 - optional exclusive grabs to prevent duplicate stock handling;
@@ -40,6 +42,16 @@ The daemon refuses to run on devices other than `NX809J`. It dynamically checks
 all required input and sysfs interfaces, releases every virtual contact before
 exit, and destroys its uinput device on shutdown. The module supervisor uses a
 bounded restart delay rather than a tight crash loop.
+
+The installed daemon boots inactive. Creating the private `active` marker—or
+calling `bridge-control.sh on`—arms and exclusively acquires the triggers.
+Calling `bridge-control.sh off` releases every virtual contact, relinquishes
+both physical input devices, and restores the hardware modes observed at
+activation. This is the control boundary used by Redmagic 11 Toolbox when a
+configured game enters or leaves the foreground.
+
+See [`docs/CONTROL.md`](docs/CONTROL.md) for the command interface and Toolbox
+integration contract.
 
 ## Attribution
 
