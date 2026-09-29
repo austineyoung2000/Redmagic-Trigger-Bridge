@@ -61,6 +61,7 @@ struct bridge {
     bool physical_y_valid[MAX_PHYSICAL_SLOTS];
     int physical_slot;
     int physical_slot_count;
+    int virtual_slot;
     bool physical_touch_down;
     bool combined_touch_down;
     bool active;
@@ -386,6 +387,14 @@ static bool emit_event(int fd, uint16_t type, uint16_t code, int32_t value) {
     return write(fd, &event, sizeof(event)) == (ssize_t)sizeof(event);
 }
 
+static void select_virtual_slot(struct bridge *bridge, int slot) {
+    if (bridge->virtual_slot == slot) {
+        return;
+    }
+    emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_SLOT, slot);
+    bridge->virtual_slot = slot;
+}
+
 static void reset_touch_state(struct bridge *bridge) {
     memset(bridge->physical_down, 0, sizeof(bridge->physical_down));
     memset(bridge->physical_x, 0, sizeof(bridge->physical_x));
@@ -398,6 +407,7 @@ static void reset_touch_state(struct bridge *bridge) {
         bridge->physical_tracking_id[slot] = -1;
     }
     bridge->physical_slot = 0;
+    bridge->virtual_slot = -1;
     bridge->physical_touch_down = false;
     bridge->combined_touch_down = false;
     bridge->down[SLOT_LEFT] = false;
@@ -523,7 +533,7 @@ static void send_contact(struct bridge *bridge, int slot, bool pressed) {
     }
 
     int virtual_slot = bridge->physical_slot_count + slot;
-    emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_SLOT, virtual_slot);
+    select_virtual_slot(bridge, virtual_slot);
     if (pressed) {
         struct point point = raw_point(bridge, slot);
         int tracking_id = 65535 - slot;
@@ -554,7 +564,7 @@ static void release_physical_contacts(struct bridge *bridge) {
         if (!bridge->physical_down[slot]) {
             continue;
         }
-        emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_SLOT, slot);
+        select_virtual_slot(bridge, slot);
         emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_TRACKING_ID, -1);
         bridge->physical_down[slot] = false;
         bridge->physical_tracking_id[slot] = -1;
@@ -582,8 +592,17 @@ static void process_touch_input(struct bridge *bridge) {
                 continue;
             }
             bridge->physical_slot = event.value;
-            emit_event(bridge->uinput_fd, event.type, event.code, event.value);
+            select_virtual_slot(bridge, event.value);
             continue;
+        }
+
+        if (event.type == EV_ABS &&
+            (event.code == ABS_MT_TRACKING_ID ||
+             event.code == ABS_MT_POSITION_X ||
+             event.code == ABS_MT_POSITION_Y ||
+             event.code == ABS_MT_TOUCH_MAJOR ||
+             event.code == ABS_MT_TOUCH_MINOR)) {
+            select_virtual_slot(bridge, bridge->physical_slot);
         }
 
         if (event.type == EV_ABS && event.code == ABS_MT_TRACKING_ID) {
