@@ -21,16 +21,27 @@ current `event4`, `event5`, or `event9` numbering remains stable.
 
 ## Status
 
-Version 0.2.0 is the first public release candidate. Raw F7/F8 events,
-simultaneous holds, direct SAR arming, uinput availability, inactive-by-default
-startup, explicit activation, and forced contact release have been verified on
-an NX809J running stock Android 16 with KernelSU 3.3.0. The module remained
-installed and enabled without interfering while Redmagic 11 Toolbox selected
-the stock native TGK backend.
+Version 0.3.0 replaces the separate trigger-only virtual touchscreen with a
+merged touchscreen proxy. While active, it exclusively reads the physical
+Synaptics touchscreen and both shoulder sensors, then publishes physical
+contacts and two reserved trigger contacts through one uinput device. This
+allows movement, aiming, multi-finger input, and both shoulder triggers to
+coexist in games that reject contacts split across multiple touchscreen
+devices.
+
+The merged path has been verified on an NX809J running stock Android 16 with
+KernelSU 3.3.0. Testing covered physical-touch-only input, repeated taps and
+swipes, continuous thumbstick movement, left/right taps and holds, both
+triggers together, two physical fingers plus both triggers, contact replacement,
+and a two-minute combined-input soak without lost touches or camera snapping.
 
 The release includes:
 
-- an arm64 Android daemon using two fixed multitouch slots;
+- an arm64 Android daemon that mirrors the physical multitouch slots and
+  reserves two additional slots for the shoulder triggers;
+- protocol-B slot selection that keeps physical movement isolated from trigger
+  contacts;
+- runtime cloning of the physical touchscreen axes and capabilities;
 - inactive-by-default ownership controlled explicitly by Toolbox;
 - safe touch release during shutdown and input-device reconnects;
 - normalized per-rotation target coordinates;
@@ -39,13 +50,13 @@ The release includes:
 - a GitHub Actions build producing a flashable module ZIP.
 
 The automatic fallback path is implemented in Redmagic 11 Toolbox, but it has
-not yet been exercised end to end on a custom ROM that lacks native TGK. For
-that reason, the GitHub release is marked as a prerelease even though the module
-metadata uses the final `0.2.0` version.
+not yet been exercised end to end on a custom ROM that lacks native TGK. The
+merged input engine itself is verified on stock firmware by forcing Toolbox to
+select the module backend.
 
 ## Installation
 
-1. Download `Redmagic-Trigger-Bridge-v0.2.0.zip` from the GitHub release.
+1. Download `Redmagic-Trigger-Bridge-v0.3.0.zip` from the GitHub release.
    Verify it against the adjacent `.sha256` file.
 2. Install it from KernelSU, Magisk, or APatch.
 3. Reboot once.
@@ -64,8 +75,9 @@ diagnostics and development testing.
 - A custom ROM must retain the NX809J SAR input devices, writable trigger-mode
   nodes, the Synaptics touchscreen input description, `/dev/uinput`, and SELinux
   access compatible with its root implementation.
-- The fallback supplies independent touch contacts. It does not reproduce
-  native TGK haptics, rapid-fire modes, or system-server visual effects.
+- The fallback supplies merged physical and trigger contacts. It does not yet
+  reproduce native TGK haptics, rapid-fire modes, or system-server visual
+  effects.
 - Root is required. This is not a generic Android trigger module.
 
 ## Safety model
@@ -75,10 +87,12 @@ all required input and sysfs interfaces, releases every virtual contact before
 exit, and destroys its uinput device on shutdown. The module supervisor uses a
 bounded restart delay rather than a tight crash loop.
 
-The installed daemon boots inactive. Creating the private `active` marker—or
-calling `bridge-control.sh on`—arms and exclusively acquires the triggers.
-Calling `bridge-control.sh off` releases every virtual contact, relinquishes
-both physical input devices, and restores the hardware modes observed at
+The installed daemon boots inactive without a virtual touchscreen. Creating
+the private `active` marker—or calling `bridge-control.sh on`—creates the merged
+uinput device, arms and acquires both triggers, and temporarily acquires the
+physical touchscreen so all contacts can be forwarded together. Calling
+`bridge-control.sh off` releases every contact, destroys the virtual device,
+relinquishes all physical inputs, and restores the hardware modes observed at
 activation. This is the control boundary used by Redmagic 11 Toolbox when a
 configured game enters or leaves the foreground.
 
