@@ -36,6 +36,26 @@ queries `EVIOCGABS` at runtime rather than embedding those measurements.
 
 `/dev/uinput` and `CONFIG_INPUT_UINPUT=y` were confirmed on the stock kernel.
 
+### Merged protocol-B proxy
+
+Games may not combine contacts from two independent touchscreen devices. While
+the module backend is active, the daemon therefore grabs `synaptics_tcm_touch`,
+clones its relevant axes into one uinput device, forwards its physical slots,
+and reserves two additional slots for the shoulder triggers. When inactive, it
+destroys the virtual device and releases the physical touchscreen unchanged.
+
+Each forwarded slot-scoped event explicitly restores the corresponding virtual
+`ABS_MT_SLOT`. This is required because an injected trigger event changes the
+virtual device's selected slot while the physical protocol-B stream may continue
+an existing contact without repeating its slot number. Preserving that state
+prevents physical movement from corrupting a trigger contact and causing an
+unexpected in-game camera jump.
+
+Legacy `ABS_X` and `ABS_Y` follow the primary physical contact. A newly reused
+physical slot is not eligible as primary until both of its current X/Y values
+have arrived, preventing coordinates from a previous contact from being
+published for a frame.
+
 ## Stock TGK Binder reference
 
 The stock firmware also exposes proprietary InputManager TGK transactions. They
@@ -44,8 +64,8 @@ does not depend on them. Its path is evdev -> uinput, which can also operate on 
 custom ROM retaining the vendor/kernel trigger devices.
 
 That compatibility statement describes the required architecture. Version
-0.2.0 has been validated on stock Android 16; end-to-end automatic fallback on
-an actual custom ROM remains pending.
+0.3.0 and its forced module-backend path have been validated on stock Android
+16; end-to-end automatic fallback on an actual custom ROM remains pending.
 
 ## Shutdown invariant
 

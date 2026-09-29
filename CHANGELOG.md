@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.3.0 — 2026-09-29
+
+Stable merged-touch release.
+
+### Added
+
+- A single uinput touchscreen that combines physical Synaptics contacts with
+  two reserved shoulder-trigger contacts.
+- Runtime cloning of physical touchscreen ranges and supported axes.
+- Active-only creation and destruction of the merged virtual touchscreen.
+- Per-contact coordinate validity tracking for safely reused physical slots.
+
+### Fixed
+
+- Preserve continuous thumbstick and multi-finger input while either or both
+  shoulder triggers are pressed.
+- Derive combined `BTN_TOUCH` and `BTN_TOOL_FINGER` state from all active
+  physical and trigger contacts.
+- Mirror the primary physical contact through legacy `ABS_X` and `ABS_Y` for
+  games that require those axes.
+- Match the physical touchscreen capability bitmap instead of advertising an
+  unsupported multitouch-pressure axis.
+- Reselect the physical protocol-B slot after trigger injection, preventing
+  later physical movement from altering a trigger contact and snapping the
+  in-game camera.
+- Correct landscape target conversion for the orientation reported by the
+  NX809J display stack.
+
+### Verified
+
+- Physical touchscreen input with the merged backend active and no triggers
+  pressed.
+- Continuous thumbstick movement with repeated left/right trigger taps and
+  holds.
+- Both triggers together with one and two physical screen contacts.
+- Repeated physical contact removal and replacement during trigger activity.
+- Accurate saved trigger targets in COD Mobile at rotation 1.
+- Two-minute combined-input stress test without dropped touch, stuck contacts,
+  or unexpected aim/camera movement.
+- Clean activation on game entry and deactivation after returning to Termux.
+
+### Known boundary
+
+- The forced module backend is verified on stock NX809J firmware. Automatic
+  selection on a custom ROM without native TGK remains unverified.
+- Native TGK haptics, rapid fire, and vendor visual effects are not yet
+  reproduced by the module.
+
 ## 0.2.0 — 2026-09-29
 
 First public release candidate.

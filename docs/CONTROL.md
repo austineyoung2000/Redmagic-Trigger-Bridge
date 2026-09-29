@@ -1,8 +1,9 @@
 # Activation and Toolbox integration
 
-The module daemon starts at boot but does not arm or grab either shoulder
-trigger. It only creates its virtual touchscreen and waits for an explicit
-activation request.
+The module daemon starts at boot but does not arm or grab the shoulder triggers
+or physical touchscreen. It waits without a virtual input device until an
+explicit activation request. Activation creates the merged touchscreen proxy;
+deactivation releases all contacts and destroys it.
 
 ## Installed command interface
 
@@ -18,7 +19,7 @@ Commands:
 # Begin gameplay ownership.
 su -c '/data/adb/modules/redmagic_trigger_bridge/bridge-control.sh on'
 
-# Release contacts, physical inputs, and restored hardware modes.
+# Release contacts and physical inputs, destroy the proxy, and restore modes.
 su -c '/data/adb/modules/redmagic_trigger_bridge/bridge-control.sh off'
 
 # Reload config.conf. An active bridge is released before the new config
