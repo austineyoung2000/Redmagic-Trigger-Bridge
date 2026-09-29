@@ -363,9 +363,9 @@ static struct point raw_point(const struct bridge *bridge, int slot) {
 
     switch (rotation) {
         case 1:
-            result.x = normalized.y * bridge->x_max / NORMALIZED_MAX;
-            result.y = (NORMALIZED_MAX - normalized.x) * bridge->y_max /
+            result.x = (NORMALIZED_MAX - normalized.y) * bridge->x_max /
                        NORMALIZED_MAX;
+            result.y = normalized.x * bridge->y_max / NORMALIZED_MAX;
             break;
         case 2:
             result.x = (NORMALIZED_MAX - normalized.x) * bridge->x_max /
@@ -374,9 +374,9 @@ static struct point raw_point(const struct bridge *bridge, int slot) {
                        NORMALIZED_MAX;
             break;
         case 3:
-            result.x = (NORMALIZED_MAX - normalized.y) * bridge->x_max /
+            result.x = normalized.y * bridge->x_max / NORMALIZED_MAX;
+            result.y = (NORMALIZED_MAX - normalized.x) * bridge->y_max /
                        NORMALIZED_MAX;
-            result.y = normalized.x * bridge->y_max / NORMALIZED_MAX;
             break;
         default:
             result.x = normalized.x * bridge->x_max / NORMALIZED_MAX;
