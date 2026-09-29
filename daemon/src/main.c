@@ -57,6 +57,8 @@ struct bridge {
     int physical_tracking_id[MAX_PHYSICAL_SLOTS];
     int physical_x[MAX_PHYSICAL_SLOTS];
     int physical_y[MAX_PHYSICAL_SLOTS];
+    bool physical_x_valid[MAX_PHYSICAL_SLOTS];
+    bool physical_y_valid[MAX_PHYSICAL_SLOTS];
     int physical_slot;
     int physical_slot_count;
     bool physical_touch_down;
@@ -388,6 +390,10 @@ static void reset_touch_state(struct bridge *bridge) {
     memset(bridge->physical_down, 0, sizeof(bridge->physical_down));
     memset(bridge->physical_x, 0, sizeof(bridge->physical_x));
     memset(bridge->physical_y, 0, sizeof(bridge->physical_y));
+    memset(bridge->physical_x_valid, 0,
+           sizeof(bridge->physical_x_valid));
+    memset(bridge->physical_y_valid, 0,
+           sizeof(bridge->physical_y_valid));
     for (int slot = 0; slot < MAX_PHYSICAL_SLOTS; ++slot) {
         bridge->physical_tracking_id[slot] = -1;
     }
@@ -419,7 +425,9 @@ static bool any_physical_down(const struct bridge *bridge) {
 
 static int first_physical_down(const struct bridge *bridge) {
     for (int slot = 0; slot < bridge->physical_slot_count; ++slot) {
-        if (bridge->physical_down[slot]) {
+        if (bridge->physical_down[slot] &&
+            bridge->physical_x_valid[slot] &&
+            bridge->physical_y_valid[slot]) {
             return slot;
         }
     }
@@ -486,6 +494,15 @@ static void emit_primary_position(struct bridge *bridge) {
         return;
     }
 
+    /*
+     * A new physical contact reports its tracking ID before its coordinates.
+     * Do not let a simultaneous trigger temporarily become the legacy primary
+     * pointer or reuse coordinates left behind by the previous contact.
+     */
+    if (any_physical_down(bridge)) {
+        return;
+    }
+
     int slot = bridge->down[SLOT_LEFT] ? SLOT_LEFT :
                bridge->down[SLOT_RIGHT] ? SLOT_RIGHT : -1;
     if (slot < 0) {
@@ -541,6 +558,8 @@ static void release_physical_contacts(struct bridge *bridge) {
         emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_TRACKING_ID, -1);
         bridge->physical_down[slot] = false;
         bridge->physical_tracking_id[slot] = -1;
+        bridge->physical_x_valid[slot] = false;
+        bridge->physical_y_valid[slot] = false;
     }
     bridge->physical_touch_down = false;
     emit_combined_touch_state(bridge);
@@ -572,6 +591,8 @@ static void process_touch_input(struct bridge *bridge) {
             if (slot >= 0 && slot < bridge->physical_slot_count) {
                 bridge->physical_down[slot] = event.value >= 0;
                 bridge->physical_tracking_id[slot] = event.value;
+                bridge->physical_x_valid[slot] = false;
+                bridge->physical_y_valid[slot] = false;
             }
             emit_event(bridge->uinput_fd, event.type, event.code, event.value);
             continue;
@@ -584,8 +605,10 @@ static void process_touch_input(struct bridge *bridge) {
             if (slot >= 0 && slot < bridge->physical_slot_count) {
                 if (event.code == ABS_MT_POSITION_X) {
                     bridge->physical_x[slot] = event.value;
+                    bridge->physical_x_valid[slot] = true;
                 } else {
                     bridge->physical_y[slot] = event.value;
+                    bridge->physical_y_valid[slot] = true;
                 }
             }
             emit_event(bridge->uinput_fd, event.type, event.code, event.value);
