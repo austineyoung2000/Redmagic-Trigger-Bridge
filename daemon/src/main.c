@@ -55,6 +55,8 @@ struct bridge {
     bool down[2];
     bool physical_down[MAX_PHYSICAL_SLOTS];
     int physical_tracking_id[MAX_PHYSICAL_SLOTS];
+    int physical_x[MAX_PHYSICAL_SLOTS];
+    int physical_y[MAX_PHYSICAL_SLOTS];
     int physical_slot;
     int physical_slot_count;
     bool physical_touch_down;
@@ -387,6 +389,8 @@ static bool emit_event(int fd, uint16_t type, uint16_t code, int32_t value) {
 
 static void reset_touch_state(struct bridge *bridge) {
     memset(bridge->physical_down, 0, sizeof(bridge->physical_down));
+    memset(bridge->physical_x, 0, sizeof(bridge->physical_x));
+    memset(bridge->physical_y, 0, sizeof(bridge->physical_y));
     for (int slot = 0; slot < MAX_PHYSICAL_SLOTS; ++slot) {
         bridge->physical_tracking_id[slot] = -1;
     }
@@ -414,6 +418,15 @@ static bool any_physical_down(const struct bridge *bridge) {
         }
     }
     return false;
+}
+
+static int first_physical_down(const struct bridge *bridge) {
+    for (int slot = 0; slot < bridge->physical_slot_count; ++slot) {
+        if (bridge->physical_down[slot]) {
+            return slot;
+        }
+    }
+    return -1;
 }
 
 static void emit_combined_touch_state(struct bridge *bridge) {
@@ -466,8 +479,13 @@ static struct point raw_point(const struct bridge *bridge, int slot) {
     return result;
 }
 
-static void emit_trigger_primary_position(struct bridge *bridge) {
-    if (bridge->physical_touch_down) {
+static void emit_primary_position(struct bridge *bridge) {
+    int physical_slot = first_physical_down(bridge);
+    if (physical_slot >= 0) {
+        emit_event(bridge->uinput_fd, EV_ABS, ABS_X,
+                   bridge->physical_x[physical_slot]);
+        emit_event(bridge->uinput_fd, EV_ABS, ABS_Y,
+                   bridge->physical_y[physical_slot]);
         return;
     }
 
@@ -505,7 +523,7 @@ static void send_contact(struct bridge *bridge, int slot, bool pressed) {
         emit_event(bridge->uinput_fd, EV_ABS, ABS_MT_TRACKING_ID, -1);
     }
     bridge->down[slot] = pressed;
-    emit_trigger_primary_position(bridge);
+    emit_primary_position(bridge);
     emit_combined_touch_state(bridge);
     emit_event(bridge->uinput_fd, EV_SYN, SYN_REPORT, 0);
 }
@@ -563,6 +581,21 @@ static void process_touch_input(struct bridge *bridge) {
             continue;
         }
 
+        if (event.type == EV_ABS &&
+            (event.code == ABS_MT_POSITION_X ||
+             event.code == ABS_MT_POSITION_Y)) {
+            int slot = bridge->physical_slot;
+            if (slot >= 0 && slot < bridge->physical_slot_count) {
+                if (event.code == ABS_MT_POSITION_X) {
+                    bridge->physical_x[slot] = event.value;
+                } else {
+                    bridge->physical_y[slot] = event.value;
+                }
+            }
+            emit_event(bridge->uinput_fd, event.type, event.code, event.value);
+            continue;
+        }
+
         if (event.type == EV_KEY &&
             (event.code == BTN_TOUCH || event.code == BTN_TOOL_FINGER)) {
             if (event.code == BTN_TOUCH) {
@@ -572,7 +605,7 @@ static void process_touch_input(struct bridge *bridge) {
         }
 
         if (event.type == EV_SYN && event.code == SYN_REPORT) {
-            emit_trigger_primary_position(bridge);
+            emit_primary_position(bridge);
             emit_combined_touch_state(bridge);
             emit_event(bridge->uinput_fd, EV_SYN, SYN_REPORT, 0);
             continue;
