@@ -18,9 +18,16 @@ if [ ! -e /dev/uinput ]; then
     abort "! /dev/uinput is unavailable"
 fi
 
+state_dir="/data/adb/redmagic_trigger_bridge"
+mkdir -p "$state_dir" || abort "! Unable to create module state directory"
+chmod 0700 "$state_dir"
+rm -f "$state_dir/active" "$state_dir/disabled"
+
 set_perm_recursive "$MODPATH" 0 0 0755 0644
 set_perm "$MODPATH/bin/redmagic-trigger-bridge" 0 0 0755
 set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
+set_perm "$MODPATH/bridge-control.sh" 0 0 0755
+set_perm "$MODPATH/action.sh" 0 0 0755
 
 ui_print "- NX809J trigger bridge installed"

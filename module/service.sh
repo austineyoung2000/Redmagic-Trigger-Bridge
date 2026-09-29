@@ -6,6 +6,7 @@ CONFIG_FILE="$STATE_DIR/config.conf"
 PID_FILE="$STATE_DIR/bridge.pid"
 LOG_FILE="$STATE_DIR/bridge.log"
 STOP_FILE="$STATE_DIR/disabled"
+ACTIVE_FILE="$STATE_DIR/active"
 
 mkdir -p "$STATE_DIR"
 chmod 0700 "$STATE_DIR"
@@ -35,6 +36,12 @@ detect_rotation() {
 rotation_watcher() {
     previous=""
     while [ ! -e "$STOP_FILE" ]; do
+        if [ ! -e "$ACTIVE_FILE" ]; then
+            previous=""
+            sleep 5
+            continue
+        fi
+
         current="$(detect_rotation)"
         case "$current" in
             0|1|2|3)
@@ -44,7 +51,7 @@ rotation_watcher() {
                 fi
                 ;;
         esac
-        sleep 5
+        sleep 2
     done
 }
 
@@ -53,6 +60,7 @@ while [ "$(getprop sys.boot_completed)" != "1" ]; do
 done
 
 [ -e "$STOP_FILE" ] && exit 0
+rm -f "$ACTIVE_FILE"
 
 rotate_log
 rotation_watcher &

@@ -2,6 +2,7 @@
 
 STATE_DIR="/data/adb/redmagic_trigger_bridge"
 touch "$STATE_DIR/disabled" 2>/dev/null
+rm -f "$STATE_DIR/active"
 
 pid="$(cat "$STATE_DIR/bridge.pid" 2>/dev/null)"
 case "$pid" in
