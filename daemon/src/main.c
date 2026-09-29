@@ -407,8 +407,18 @@ static bool any_trigger_down(const struct bridge *bridge) {
     return bridge->down[SLOT_LEFT] || bridge->down[SLOT_RIGHT];
 }
 
+static bool any_physical_down(const struct bridge *bridge) {
+    for (int slot = 0; slot < bridge->physical_slot_count; ++slot) {
+        if (bridge->physical_down[slot]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void emit_combined_touch_state(struct bridge *bridge) {
-    bool wanted = bridge->physical_touch_down || any_trigger_down(bridge);
+    bool wanted = bridge->physical_touch_down || any_physical_down(bridge) ||
+                  any_trigger_down(bridge);
     if (bridge->combined_touch_down == wanted) {
         return;
     }

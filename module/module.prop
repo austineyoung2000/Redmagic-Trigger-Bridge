@@ -1,6 +1,6 @@
 id=redmagic_trigger_bridge
 name=Redmagic Trigger Bridge
-version=0.3.0-dev
-versionCode=4
+version=0.3.1-dev
+versionCode=5
 author=EliteDarkKaiser
 description=NX809J merged-touch shoulder-trigger bridge for Redmagic 11 Toolbox
