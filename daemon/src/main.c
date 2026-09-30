@@ -635,10 +635,6 @@ static void send_contact(struct bridge *bridge, int slot, bool pressed) {
         return;
     }
 
-    if (pressed) {
-        pulse_haptic(bridge);
-    }
-
     int virtual_slot = bridge->physical_slot_count + slot;
     select_virtual_slot(bridge, virtual_slot);
     if (pressed) {
@@ -656,6 +652,16 @@ static void send_contact(struct bridge *bridge, int slot, bool pressed) {
     emit_primary_position(bridge);
     emit_combined_touch_state(bridge);
     emit_event(bridge->uinput_fd, EV_SYN, SYN_REPORT, 0);
+
+    /*
+     * Complete the virtual touch frame before accessing the vibrator. Some
+     * NX809J vibrator implementations can delay a sysfs write; issuing the
+     * pulse first can collapse a short physical trigger press into an
+     * effectively zero-length virtual contact once the queued release is read.
+     */
+    if (pressed) {
+        pulse_haptic(bridge);
+    }
 }
 
 static void release_contacts(struct bridge *bridge) {

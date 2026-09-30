@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.1-dev — 2026-09-29
+## 0.3.2-dev — 2026-09-29
 
 ### Added
 
@@ -14,6 +14,11 @@
 - Continue trigger and merged-touch processing if haptic nodes are missing or
   a vibrator write fails.
 - Re-probe haptic availability on each bridge activation.
+
+### Fixed
+
+- Commit trigger touch-down through `SYN_REPORT` before starting vibrator
+  sysfs I/O, preventing short trigger presses from losing their mapped contact.
 
 ## 0.3.0 — 2026-09-29
 
