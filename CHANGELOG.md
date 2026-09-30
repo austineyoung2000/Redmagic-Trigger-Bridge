@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.3.3-dev — 2026-09-29
+## 0.3.1 — 2026-09-29
+
+Stable haptic-feedback and automatic-rotation release.
 
 ### Added
 

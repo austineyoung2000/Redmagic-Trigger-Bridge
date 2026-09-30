@@ -30,7 +30,7 @@ allows movement, aiming, multi-finger input, and both shoulder triggers to
 coexist in games that reject contacts split across multiple touchscreen
 devices.
 
-Development version 0.3.3 adds optional press-edge haptic feedback through the
+Version 0.3.1 adds optional press-edge haptic feedback through the
 NX809J vibrator interface. Feedback is rate-limited, never runs for key-repeat
 or release events, and automatically disables itself without affecting touch
 input if the vibrator interface is missing or rejects a write. The daemon
@@ -66,7 +66,7 @@ select the module backend.
 
 ## Installation
 
-1. Download `Redmagic-Trigger-Bridge-v0.3.0.zip` from the GitHub release.
+1. Download `Redmagic-Trigger-Bridge-v0.3.1.zip` from the GitHub release.
    Verify it against the adjacent `.sha256` file.
 2. Install it from KernelSU, Magisk, or APatch.
 3. Reboot once.
