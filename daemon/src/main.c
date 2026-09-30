@@ -25,9 +25,15 @@
 #define TOUCH_NAME "synaptics_tcm_touch"
 #define SAR0_MODE "/sys/class/leds/sar0/mode_operation"
 #define SAR1_MODE "/sys/class/leds/sar1/mode_operation"
+#define HAPTIC_DURATION "/sys/class/leds/zte_vibrator/duration"
+#define HAPTIC_GAIN "/sys/class/leds/zte_vibrator/gain"
+#define HAPTIC_ACTIVATE "/sys/class/leds/zte_vibrator/activate"
 #define CONFIG_PATH "/data/adb/redmagic_trigger_bridge/config.conf"
 #define ACTIVE_PATH "/data/adb/redmagic_trigger_bridge/active"
 #define NORMALIZED_MAX 10000
+#define DEFAULT_HAPTIC_GAIN 150
+#define DEFAULT_HAPTIC_DURATION_MS 100
+#define MINIMUM_HAPTIC_GAP_MS 90
 #define SLOT_LEFT 0
 #define SLOT_RIGHT 1
 #define TRIGGER_SLOT_COUNT 2
@@ -42,6 +48,9 @@ struct config {
     bool enabled;
     bool grab_devices;
     bool swap_triggers;
+    bool haptics_enabled;
+    int haptic_gain;
+    int haptic_duration_ms;
     struct point targets[4][2];
 };
 
@@ -68,6 +77,8 @@ struct bridge {
     bool sar0_grabbed;
     bool sar1_grabbed;
     bool touch_grabbed;
+    bool haptics_available;
+    int64_t last_haptic_ms;
     int original_mode[2];
     bool original_mode_valid[2];
     int tracking_id[2];
@@ -172,10 +183,23 @@ static int clamp_normalized(long value) {
     return (int)value;
 }
 
+static int clamp_value(long value, int minimum, int maximum) {
+    if (value < minimum) {
+        return minimum;
+    }
+    if (value > maximum) {
+        return maximum;
+    }
+    return (int)value;
+}
+
 static void default_config(struct config *config) {
     memset(config, 0, sizeof(*config));
     config->enabled = true;
     config->grab_devices = true;
+    config->haptics_enabled = true;
+    config->haptic_gain = DEFAULT_HAPTIC_GAIN;
+    config->haptic_duration_ms = DEFAULT_HAPTIC_DURATION_MS;
 
     for (int rotation = 0; rotation < 4; ++rotation) {
         config->targets[rotation][SLOT_LEFT] = (struct point){2500, 5000};
@@ -194,6 +218,18 @@ static void set_config_value(struct config *config, const char *key, long value)
     }
     if (strcmp(key, "swap_triggers") == 0) {
         config->swap_triggers = value != 0;
+        return;
+    }
+    if (strcmp(key, "haptics_enabled") == 0) {
+        config->haptics_enabled = value != 0;
+        return;
+    }
+    if (strcmp(key, "haptic_gain") == 0) {
+        config->haptic_gain = clamp_value(value, 1, 255);
+        return;
+    }
+    if (strcmp(key, "haptic_duration_ms") == 0) {
+        config->haptic_duration_ms = clamp_value(value, 1, 1000);
         return;
     }
 
@@ -262,6 +298,73 @@ static bool write_text(const char *path, const char *value) {
     close(fd);
     errno = saved_errno;
     return written == (ssize_t)length;
+}
+
+static bool write_number(const char *path, int value) {
+    char text[32];
+    int length = snprintf(text, sizeof(text), "%d\n", value);
+    if (length < 0 || (size_t)length >= sizeof(text)) {
+        errno = EOVERFLOW;
+        return false;
+    }
+    return write_text(path, text);
+}
+
+static int64_t monotonic_milliseconds(void) {
+    struct timespec timestamp;
+    if (clock_gettime(CLOCK_MONOTONIC, &timestamp) != 0) {
+        return -1;
+    }
+    return (int64_t)timestamp.tv_sec * 1000 +
+           (int64_t)timestamp.tv_nsec / 1000000;
+}
+
+static void configure_haptics(struct bridge *bridge) {
+    bridge->haptics_available = false;
+    bridge->last_haptic_ms = 0;
+
+    if (!bridge->config.haptics_enabled) {
+        return;
+    }
+
+    if (access(HAPTIC_DURATION, W_OK) != 0 ||
+        access(HAPTIC_GAIN, W_OK) != 0 ||
+        access(HAPTIC_ACTIVATE, W_OK) != 0) {
+        log_message(
+            "WARN",
+            "trigger haptics unavailable; continuing without feedback"
+        );
+        return;
+    }
+
+    bridge->haptics_available = true;
+}
+
+static void pulse_haptic(struct bridge *bridge) {
+    if (!bridge->active || !bridge->config.haptics_enabled ||
+        !bridge->haptics_available) {
+        return;
+    }
+
+    int64_t now = monotonic_milliseconds();
+    if (now < 0 ||
+        (bridge->last_haptic_ms > 0 &&
+         now - bridge->last_haptic_ms < MINIMUM_HAPTIC_GAP_MS)) {
+        return;
+    }
+
+    if (!write_number(HAPTIC_DURATION, bridge->config.haptic_duration_ms) ||
+        !write_number(HAPTIC_GAIN, bridge->config.haptic_gain) ||
+        !write_text(HAPTIC_ACTIVATE, "1\n")) {
+        bridge->haptics_available = false;
+        log_message(
+            "WARN",
+            "trigger haptic pulse failed; feedback disabled until reactivation"
+        );
+        return;
+    }
+
+    bridge->last_haptic_ms = now;
 }
 
 static bool read_mode(const char *path, int *mode) {
@@ -549,6 +652,16 @@ static void send_contact(struct bridge *bridge, int slot, bool pressed) {
     emit_primary_position(bridge);
     emit_combined_touch_state(bridge);
     emit_event(bridge->uinput_fd, EV_SYN, SYN_REPORT, 0);
+
+    /*
+     * Complete the virtual touch frame before accessing the vibrator. Some
+     * NX809J vibrator implementations can delay a sysfs write; issuing the
+     * pulse first can collapse a short physical trigger press into an
+     * effectively zero-length virtual contact once the queued release is read.
+     */
+    if (pressed) {
+        pulse_haptic(bridge);
+    }
 }
 
 static void release_contacts(struct bridge *bridge) {
@@ -672,6 +785,8 @@ static void deactivate_bridge(struct bridge *bridge) {
 
     destroy_uinput(bridge);
     reset_touch_state(bridge);
+    bridge->haptics_available = false;
+    bridge->last_haptic_ms = 0;
 
     const char *mode_paths[2] = {SAR0_MODE, SAR1_MODE};
     for (int index = 0; index < 2; ++index) {
@@ -743,6 +858,7 @@ static bool activate_bridge(struct bridge *bridge) {
     bridge->touch_grabbed = true;
 
     bridge->active = true;
+    configure_haptics(bridge);
     log_message("INFO", "trigger bridge activated with merged touch proxy");
     return true;
 }

@@ -28,8 +28,35 @@ rotate_log() {
 }
 
 detect_rotation() {
-    dumpsys input 2>/dev/null |
-        sed -n 's/.*SurfaceOrientation:[[:space:]]*\([0-3]\).*/\1/p' |
+    rotation="$(
+        dumpsys input 2>/dev/null |
+            sed -n \
+                's/.*SurfaceOrientation:[[:space:]]*\([0-3]\).*/\1/p' |
+            head -n 1
+    )"
+
+    case "$rotation" in
+        0|1|2|3)
+            printf '%s\n' "$rotation"
+            return 0
+            ;;
+    esac
+
+    rotation="$(
+        dumpsys window displays 2>/dev/null |
+            sed -n 's/.*mRotation=\([0-3]\).*/\1/p' |
+            head -n 1
+    )"
+
+    case "$rotation" in
+        0|1|2|3)
+            printf '%s\n' "$rotation"
+            return 0
+            ;;
+    esac
+
+    dumpsys display 2>/dev/null |
+        sed -n 's/.*mCurrentOrientation=\([0-3]\).*/\1/p' |
         head -n 1
 }
 
