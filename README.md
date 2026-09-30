@@ -30,12 +30,14 @@ allows movement, aiming, multi-finger input, and both shoulder triggers to
 coexist in games that reject contacts split across multiple touchscreen
 devices.
 
-Development version 0.3.2 adds optional press-edge haptic feedback through the
+Development version 0.3.3 adds optional press-edge haptic feedback through the
 NX809J vibrator interface. Feedback is rate-limited, never runs for key-repeat
 or release events, and automatically disables itself without affecting touch
 input if the vibrator interface is missing or rejects a write. The daemon
 commits the virtual touch-down frame before starting vibrator I/O so haptics
-cannot suppress short trigger contacts.
+cannot suppress short trigger contacts. Rotation tracking falls back from the
+vendor `SurfaceOrientation` field to Android window/display rotation when the
+vendor field is absent.
 
 The merged path has been verified on an NX809J running stock Android 16 with
 KernelSU 3.3.0. Testing covered physical-touch-only input, repeated taps and

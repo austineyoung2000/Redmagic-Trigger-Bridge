@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.2-dev — 2026-09-29
+## 0.3.3-dev — 2026-09-29
 
 ### Added
 
@@ -19,6 +19,8 @@
 
 - Commit trigger touch-down through `SYN_REPORT` before starting vibrator
   sysfs I/O, preventing short trigger presses from losing their mapped contact.
+- Fall back to `dumpsys window displays` and `dumpsys display` rotation fields
+  when the firmware omits `SurfaceOrientation` from `dumpsys input`.
 
 ## 0.3.0 — 2026-09-29
 
