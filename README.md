@@ -15,6 +15,7 @@ stock firmware and custom ROMs that retain the NX809J vendor and kernel stack.
 | Trigger arming | `/sys/class/leds/sar0/mode_operation`, `/sys/class/leds/sar1/mode_operation` |
 | Touchscreen | `synaptics_tcm_touch` |
 | Virtual input | `/dev/uinput` |
+| Trigger haptics | `/sys/class/leds/zte_vibrator/{duration,gain,activate}` |
 
 The daemon discovers event nodes by device name; it never assumes that the
 current `event4`, `event5`, or `event9` numbering remains stable.
@@ -28,6 +29,11 @@ contacts and two reserved trigger contacts through one uinput device. This
 allows movement, aiming, multi-finger input, and both shoulder triggers to
 coexist in games that reject contacts split across multiple touchscreen
 devices.
+
+Development version 0.3.1 adds optional press-edge haptic feedback through the
+NX809J vibrator interface. Feedback is rate-limited, never runs for key-repeat
+or release events, and automatically disables itself without affecting touch
+input if the vibrator interface is missing or rejects a write.
 
 The merged path has been verified on an NX809J running stock Android 16 with
 KernelSU 3.3.0. Testing covered physical-touch-only input, repeated taps and
@@ -76,8 +82,9 @@ diagnostics and development testing.
   nodes, the Synaptics touchscreen input description, `/dev/uinput`, and SELinux
   access compatible with its root implementation.
 - The fallback supplies merged physical and trigger contacts. It does not yet
-  reproduce native TGK haptics, rapid-fire modes, or system-server visual
-  effects.
+  reproduce native TGK rapid-fire modes or system-server visual effects. Its
+  vibrator pulse approximates trigger feedback but does not reproduce ZTE's
+  proprietary TGK waveform.
 - Root is required. This is not a generic Android trigger module.
 
 ## Safety model

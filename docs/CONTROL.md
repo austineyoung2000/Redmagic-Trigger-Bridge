@@ -69,3 +69,17 @@ The private state directory is:
 It is root-only (`0700`). `config.conf` should remain `0600`. Do not hard-code
 Linux event numbers; the daemon discovers the physical trigger inputs and the
 touchscreen by their kernel device names.
+
+The module also accepts these optional haptic values:
+
+```text
+haptics_enabled=1
+haptic_gain=150
+haptic_duration_ms=100
+```
+
+Haptics are emitted only for a new left or right trigger-down edge while the
+bridge is active. A shared 90 ms limiter prevents simultaneous triggers or
+key-repeat noise from flooding the vibrator. Missing or unwritable vibrator
+nodes disable feedback for that activation without interrupting trigger or
+touch processing.

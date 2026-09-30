@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.1-dev — 2026-09-29
+
+### Added
+
+- Optional shoulder-trigger haptic feedback through the confirmed NX809J
+  `zte_vibrator` duration, gain, and activate nodes.
+- Configurable haptic gain and duration with safe range clamping.
+
+### Safety
+
+- Emit feedback only on a new trigger-down edge, with a shared 90 ms limiter.
+- Continue trigger and merged-touch processing if haptic nodes are missing or
+  a vibrator write fails.
+- Re-probe haptic availability on each bridge activation.
+
 ## 0.3.0 — 2026-09-29
 
 Stable merged-touch release.
