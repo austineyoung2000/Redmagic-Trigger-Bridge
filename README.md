@@ -123,3 +123,9 @@ new implementation intended for root-module and Toolbox integration.
 ## License
 
 GPL-3.0-or-later. See `LICENSE`.
+
+### Root module boot startup
+
+With compatible Toolbox and Trigger Bridge builds installed, the module initializes Toolbox background services after Android finishes booting and user 0 first unlocks. No Toolbox screen opens. Root/system/shell-only receiver access, NX809J validation, and the existing per-boot startup claim protect this fallback. It respects saved lighting/trigger settings and keeps game mappings under normal foreground ownership. Grant required permissions and configure Toolbox once before using automatic startup. This also works while Native TGK owns the triggers.
+
+The module makes up to five broadcast attempts and records the latest result in `/data/adb/redmagic_trigger_bridge/toolbox-boot.log`. Broadcast delivery does not guarantee every configured service started; confirm device behavior after reboot. Older APKs lack this receiver. Both updated APK and module are required.
