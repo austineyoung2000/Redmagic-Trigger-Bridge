@@ -26,6 +26,7 @@ rm -f "$state_dir/active" "$state_dir/disabled"
 set_perm_recursive "$MODPATH" 0 0 0755 0644
 set_perm "$MODPATH/bin/redmagic-trigger-bridge" 0 0 0755
 set_perm "$MODPATH/service.sh" 0 0 0755
+set_perm "$MODPATH/toolbox-boot.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
 set_perm "$MODPATH/bridge-control.sh" 0 0 0755
 set_perm "$MODPATH/action.sh" 0 0 0755

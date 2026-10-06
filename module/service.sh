@@ -87,6 +87,10 @@ while [ "$(getprop sys.boot_completed)" != "1" ]; do
 done
 
 [ -e "$STOP_FILE" ] && exit 0
+
+# Independent from backend ownership: also useful on stock Native TGK.
+sh "$MODDIR/toolbox-boot.sh" &
+
 rm -f "$ACTIVE_FILE"
 
 rotate_log
