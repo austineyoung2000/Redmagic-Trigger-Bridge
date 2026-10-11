@@ -17,6 +17,11 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Check notification recovery policy
+        run: |
+          sh -n module/notification-supervisor.sh
+          python3 scripts/test-notification-supervisor.py
+
       - name: Configure native build
         run: >-
           cmake -S daemon -B build

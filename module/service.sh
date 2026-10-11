@@ -90,6 +90,8 @@ done
 
 # Independent from backend ownership: also useful on stock Native TGK.
 sh "$MODDIR/toolbox-boot.sh" &
+# Independent listener supervision also works with stock Native TGK.
+sh "$MODDIR/notification-supervisor.sh" &
 
 rm -f "$ACTIVE_FILE"
 

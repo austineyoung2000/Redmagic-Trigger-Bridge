@@ -129,3 +129,16 @@ GPL-3.0-or-later. See `LICENSE`.
 With compatible Toolbox and Trigger Bridge builds installed, the module initializes Toolbox background services after Android finishes booting and user 0 first unlocks. No Toolbox screen opens. Root/system/shell-only receiver access, NX809J validation, and the existing per-boot startup claim protect this fallback. It respects saved lighting/trigger settings and keeps game mappings under normal foreground ownership. Grant required permissions and configure Toolbox once before using automatic startup. This also works while Native TGK owns the triggers.
 
 The module makes up to five broadcast attempts and records the latest result in `/data/adb/redmagic_trigger_bridge/toolbox-boot.log`. Broadcast delivery does not guarantee every configured service started; confirm device behavior after reboot. Older APKs lack this receiver. Both updated APK and module are required.
+
+
+## Notification listener recovery (test build)
+
+Requires the matching Toolbox test APK with `notification-listener-recovery` in its no-backup directory. The independent module supervisor checks this event-written, notification-free state every 20 seconds while enabled, verifying boot ID, package UID, PID and process start time. It does not poll Android notification dumps, hold a wake lock, or read message content.
+
+After listener loss it uses the existing NX809J AutoLaunch/startup path, then resets only Toolbox's listener binding using the app's UID. The uploaded NX809J framework exposes requestUnbindListenerComponent (83) and requestBindListener (81); ordinary requestRebind is a no-op when the component is already unsnoozed. Firmware hashes must match exactly before these Binder numbers can be used. Access and feature enablement are required and rechecked; no notification permission is granted/revoked and no secure setting is rewritten. Recovery is successful only after the APK records Android's connection callback. Five failed attempts back off for five minutes.
+
+This supervisor does not write LEDs, fan/pump nodes, SAR nodes, or trigger mappings. Existing LED timing/priority/cooling code remains responsible for hardware. Module disable/removal stops supervision. It cannot prevent SIGKILL, reconstruct notifications missed while unbound, run during CPU suspend, or guarantee Binder/root availability. Normal exact-deadline cleanup is still in the APK. Recovery latency includes the check interval and connection grace periods; this is a recovery mechanism, not uninterrupted notification delivery.
+
+Firmware provenance: uploaded framework.jar SHA-256 f7aafb0787ae83d014ff44dcc1543273294a2e0d68725d589a3d97ce79e122df; services.jar SHA-256 e0e1e0a8ed7c887eddf4eec150845b99c7bacc245ac3024df3852364fe3a5a7e. Connection reset and root-manager UID switching require NX809J phone validation before merging.
+
+Diagnostic log: `/data/adb/redmagic_trigger_bridge/notification-supervisor.log` (64 KiB plus one rotated copy). This test does not modify the gameplay supervisor or native input daemon.
