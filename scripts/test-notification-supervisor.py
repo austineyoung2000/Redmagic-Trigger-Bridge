@@ -11,9 +11,26 @@ FUNCTIONS = SCRIPT.read_text().split('device=$(getprop ro.product.device)')[0]
 class RecoveryTests(unittest.TestCase):
     def run_case(self, body):
         with tempfile.TemporaryDirectory() as directory:
-            script = FUNCTIONS + f'\nLOG={directory}/log\n' + body
+            script = FUNCTIONS + f'\nPATH=/usr/bin:/bin\nLOG={directory}/log\n' + body
             result = subprocess.run(['sh', '-c', script], text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_beacon_requires_current_boot_owner_and_desired_state(self):
+        self.run_case('''
+CURRENT_BOOT=boot-current
+BEACON=$(mktemp)
+trap 'rm -f "$BEACON"' EXIT
+stat() { printf '10500'; }
+printf 'version=1\\nboot=boot-old\\npid=12\\nuid=10500\\nstart=99\\ndesired=true\\nconnected=true\\n' > "$BEACON"
+read_beacon && exit 91
+sed -i 's/boot-old/boot-current/' "$BEACON"
+read_beacon || exit 92
+sed -i 's/uid=10500/uid=10501/' "$BEACON"
+read_beacon && exit 93
+sed -i 's/uid=10501/uid=10500/; s/desired=true/desired=false/' "$BEACON"
+read_beacon && exit 94
+exit 0
+''')
 
     def test_no_access_never_resets_binding(self):
         self.run_case('''

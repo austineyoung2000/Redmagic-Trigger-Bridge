@@ -20,7 +20,9 @@ log() {
 }
 enabled() { grep -q '<boolean name="enabled" value="true"' "$PREFS" 2>/dev/null; }
 approved() {
-    listeners=$(su 2000 -c 'settings --user 0 get secure enabled_notification_listeners' 2>/dev/null)
+    listeners=$(timeout 8 su 2000 -c 'settings --user 0 get secure enabled_notification_listeners' 2>/dev/null)
+    status=$?
+    [ "$status" -eq 0 ] || { log "notification access lookup failed status=$status"; return 1; }
     case ":$listeners:" in *":$PACKAGE/$COMPONENT:"*|*":$PACKAGE/.NotificationLightingService:"*) return 0 ;; *) return 1 ;; esac
 }
 read_beacon() {
