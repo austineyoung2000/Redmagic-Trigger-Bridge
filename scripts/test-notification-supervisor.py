@@ -59,7 +59,7 @@ recover && exit 91
 [ "$calls" = " 83 81" ] || exit 92
 ''')
 
-    def test_failed_unbind_does_not_claim_success(self):
+    def test_failed_unbind_still_attempts_rebind_without_claiming_success(self):
         self.run_case('''
 enabled() { return 0; }; approved() { return 0; }
 timeout() { return 0; }; sleep() { :; }; healthy() { return 1; }
@@ -67,7 +67,7 @@ read_beacon() { uid=10500; return 0; }
 calls=""
 binder_call() { calls="$calls $1"; return 1; }
 recover && exit 91
-[ "$calls" = " 83" ] || exit 92
+[ "$calls" = " 83 81" ] || exit 92
 ''')
 
     def test_access_rechecked_before_reset(self):

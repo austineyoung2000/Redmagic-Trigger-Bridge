@@ -57,8 +57,8 @@ binder_call() {
     # Values and ComponentName parcel layout verified from this exact uploaded firmware.
     output=$(timeout 8 su "$uid" -c "service call notification $1 i32 1 s16 $PACKAGE s16 $COMPONENT" 2>&1)
     status=$?
-    [ "$status" -eq 0 ] || { log "Binder transaction $1 failed status=$status"; return 1; }
-    case "$output" in *"Parcel(00000000"*|*"Parcel( 00000000"*) return 0 ;; *) log "Binder transaction $1 lacked no-exception receipt"; return 1 ;; esac
+    [ "$status" -eq 0 ] || { log "Binder transaction $1 failed status=$status response=$(printf '%s' \"$output\" | head -c 1200 | tr '\n' ' ')"; return 1; }
+    case "$output" in *"Parcel(00000000"*|*"Parcel( 00000000"*) return 0 ;; *) log "Binder transaction $1 lacked no-exception receipt response=$(printf '%s' \"$output\" | head -c 1200 | tr '\n' ' ')"; return 1 ;; esac
 }
 recover() {
     enabled && approved || return 1
@@ -70,11 +70,17 @@ recover() {
     # Require the new APK's handoff and recheck access immediately before changing binding.
     read_beacon && enabled && approved || { log "no eligible current-boot APK handoff; recovery deferred"; return 1; }
     log "resetting only Toolbox listener binding as uid=$uid"
-    binder_call 83 || return 1
-    # Always attempt rebind after an acknowledged unbind, even during module shutdown.
-    binder_call 81 || { log "rebind failed; next attempt will retry"; return 1; }
+    binder_call 83
+    unbind_status=$?
+    # A missing receipt does not prove unbind did not happen. Always attempt rebind.
+    binder_call 81
+    bind_status=$?
+    if [ "$unbind_status" -ne 0 ] || [ "$bind_status" -ne 0 ]; then
+        identity=$(timeout 8 su "$uid" -c id 2>&1 | head -c 400 | tr '\n' ' ')
+        log "recovery caller=$identity; unbind=$unbind_status bind=$bind_status"
+    fi
     sleep 8
-    healthy || { log "binding reset acknowledged; connection callback still absent"; return 1; }
+    healthy || { log "listener callback absent after reset; unbind=$unbind_status bind=$bind_status"; return 1; }
     log "listener connected: callback acknowledged pid=$pid"
     return 0
 }
@@ -100,8 +106,11 @@ device=$(getprop ro.product.device)
 model=$(getprop ro.product.model)
 [ "$device" = NX809J ] || [ "$model" = NX809J ] || exit 0
 # Fail closed on different Binder layouts, including future firmware updates.
-[ "$(sha256sum /system/framework/framework.jar | cut -d ' ' -f 1)" = f7aafb0787ae83d014ff44dcc1543273294a2e0d68725d589a3d97ce79e122df ] || exit 0
-[ "$(sha256sum /system/framework/services.jar | cut -d ' ' -f 1)" = e0e1e0a8ed7c887eddf4eec150845b99c7bacc245ac3024df3852364fe3a5a7e ] || exit 0
+mkdir -p "$STATE_DIR"
+chmod 0700 "$STATE_DIR"
+log "notification supervisor startup context=$(id)"
+[ "$(sha256sum /system/framework/framework.jar | cut -d ' ' -f 1)" = f7aafb0787ae83d014ff44dcc1543273294a2e0d68725d589a3d97ce79e122df ] || { log "firmware gate rejected framework.jar"; exit 0; }
+[ "$(sha256sum /system/framework/services.jar | cut -d ' ' -f 1)" = e0e1e0a8ed7c887eddf4eec150845b99c7bacc245ac3024df3852364fe3a5a7e ] || { log "firmware gate rejected services.jar"; exit 0; }
 mkdir -p "$STATE_DIR"
 chmod 0700 "$STATE_DIR"
 acquire_lock || exit 0
