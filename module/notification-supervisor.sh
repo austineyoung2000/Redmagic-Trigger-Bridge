@@ -55,7 +55,12 @@ healthy() {
 }
 binder_call() {
     # Values and ComponentName parcel layout verified from this exact uploaded firmware.
-    output=$(timeout 8 su -c "su $uid -c 'service call notification $1 i32 1 s16 $PACKAGE s16 $COMPONENT'" 2>&1)
+    # The proven one-shot allowance expires after 500ms; arm in the same root invocation as bind.
+    launch_gate=""
+    if [ "$1" = 81 ]; then
+        launch_gate="su 2000 -c 'service call AutoLaunch 6 s16 $PACKAGE' >/dev/null 2>&1; "
+    fi
+    output=$(timeout 8 su -c "${launch_gate}su $uid -c 'service call notification $1 i32 1 s16 $PACKAGE s16 $COMPONENT'" 2>&1)
     status=$?
     [ "$status" -eq 0 ] || { log "Binder transaction $1 failed status=$status response=$(printf '%s' "$output" | head -c 1200 | tr '\n' ' ')"; return 1; }
     compact=$(printf '%s' "$output" | tr -d '[:space:]')

@@ -104,5 +104,16 @@ binder_call 83 && exit 92
 exit 0
 ''')
 
+    def test_bind_arms_one_shot_in_same_invocation_before_binder(self):
+        self.run_case('''
+uid=10500
+timeout() {
+    [ "$1" = 8 ] && [ "$2" = su ] && [ "$3" = -c ] || exit 91
+    case "$4" in *"AutoLaunch 6"*"service call notification 81"*) ;; *) exit 92 ;; esac
+    printf "Result: Parcel(    00000000    '....')"
+}
+binder_call 81
+''')
+
 if __name__ == '__main__':
     unittest.main()
