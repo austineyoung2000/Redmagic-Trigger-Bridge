@@ -59,7 +59,7 @@ recover && exit 91
 [ "$calls" = " 83 81" ] || exit 92
 ''')
 
-    def test_failed_unbind_does_not_claim_success(self):
+    def test_failed_unbind_still_attempts_rebind_without_claiming_success(self):
         self.run_case('''
 enabled() { return 0; }; approved() { return 0; }
 timeout() { return 0; }; sleep() { :; }; healthy() { return 1; }
@@ -67,7 +67,7 @@ read_beacon() { uid=10500; return 0; }
 calls=""
 binder_call() { calls="$calls $1"; return 1; }
 recover && exit 91
-[ "$calls" = " 83" ] || exit 92
+[ "$calls" = " 83 81" ] || exit 92
 ''')
 
     def test_access_rechecked_before_reset(self):
@@ -90,5 +90,59 @@ timeout() { printf 'Result: Parcel(00000000)'; return 0; }
 binder_call 83
 ''')
 
+    def test_variable_spacing_and_multiline_success_receipts(self):
+        self.run_case('''
+uid=10500
+for reply in "Result: Parcel(00000000 '....')" "Result: Parcel(    00000000    '....')" "Result:
+ Parcel(
+  0x00000000: 00000000 '....')"; do
+    timeout() { printf '%s' "$reply"; return 0; }
+    binder_call 83 || exit 91
+done
+reply="Result: Parcel(    fffffffc 00000000)"
+binder_call 83 && exit 92
+exit 0
+''')
+
+    def test_bind_arms_one_shot_in_same_invocation_before_binder(self):
+        self.run_case('''
+uid=10500
+timeout() {
+    [ "$1" = 8 ] && [ "$2" = su ] && [ "$3" = -c ] || exit 91
+    case "$4" in *"AutoLaunch 6"*"service call notification 81"*) ;; *) exit 92 ;; esac
+    printf "Result: Parcel(    00000000    '....')"
+}
+binder_call 81
+''')
+
+    def test_lock_rejects_live_owner_but_reclaims_reused_pid(self):
+        self.run_case('''
+LOCK=$(mktemp -d)
+trap 'rm -rf "$LOCK"' EXIT
+CURRENT_BOOT=boot-current
+OWN_IDENTITY="boot-current:$$:999"
+printf 'boot-current:%s:123\\n' "$$" > "$LOCK/owner"
+process_start() { printf '123'; }
+acquire_lock && exit 91
+process_start() { printf '456'; }
+acquire_lock || exit 92
+[ "$(cat "$LOCK/owner")" = "$OWN_IDENTITY" ] || exit 93
+release_lock
+[ ! -e "$LOCK" ] || exit 94
+''')
+
+    def test_previous_boot_owner_cannot_block_current_boot(self):
+        self.run_case('''
+LOCK=$(mktemp -d)
+trap 'rm -rf "$LOCK"' EXIT
+CURRENT_BOOT=boot-current
+OWN_IDENTITY="boot-current:$$:999"
+printf 'boot-old:%s:123\\n' "$$" > "$LOCK/owner"
+process_start() { printf '123'; }
+acquire_lock || exit 91
+[ "$(cat "$LOCK/owner")" = "$OWN_IDENTITY" ] || exit 92
+''')
+
 if __name__ == '__main__':
     unittest.main()
+

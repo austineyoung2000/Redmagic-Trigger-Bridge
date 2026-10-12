@@ -142,3 +142,8 @@ This supervisor does not write LEDs, fan/pump nodes, SAR nodes, or trigger mappi
 Firmware provenance: uploaded framework.jar SHA-256 f7aafb0787ae83d014ff44dcc1543273294a2e0d68725d589a3d97ce79e122df; services.jar SHA-256 e0e1e0a8ed7c887eddf4eec150845b99c7bacc245ac3024df3852364fe3a5a7e. Connection reset and root-manager UID switching require NX809J phone validation before merging.
 
 Diagnostic log: `/data/adb/redmagic_trigger_bridge/notification-supervisor.log` (64 KiB plus one rotated copy). This test does not modify the gameplay supervisor or native input daemon.
+
+
+Recovery receipt correction: an uncertain unbind response now always gets a rebind attempt; only the real connection callback can confirm success. Failed Binder output is retained up to 1200 characters with caller identity recorded. Manual calls on the phone succeeded; the differing automatic invocation is not yet explained. This does not prevent paired SIGKILL or alter LED behavior.
+
+Binder reset now uses the same outer-root then Toolbox-UID invocation sequence that returned no-exception receipts in the user's Termux command. This matches the demonstrated route without assuming the module service process already shares its execution context. An execution-context cause is not yet proven; failed output and identity remain recorded and actual connection is still required.
