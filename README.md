@@ -145,3 +145,5 @@ Diagnostic log: `/data/adb/redmagic_trigger_bridge/notification-supervisor.log` 
 
 
 Recovery receipt correction: an uncertain unbind response now always gets a rebind attempt; only the real connection callback can confirm success. Failed Binder output is retained up to 1200 characters with caller identity recorded. Manual calls on the phone succeeded; the differing automatic invocation is not yet explained. This does not prevent paired SIGKILL or alter LED behavior.
+
+Binder reset now uses the same outer-root then Toolbox-UID invocation sequence that returned no-exception receipts in the user's Termux command. This matches the demonstrated route without assuming the module service process already shares its execution context. An execution-context cause is not yet proven; failed output and identity remain recorded and actual connection is still required.
