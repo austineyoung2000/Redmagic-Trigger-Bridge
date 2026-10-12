@@ -115,5 +115,34 @@ timeout() {
 binder_call 81
 ''')
 
+    def test_lock_rejects_live_owner_but_reclaims_reused_pid(self):
+        self.run_case('''
+LOCK=$(mktemp -d)
+trap 'rm -rf "$LOCK"' EXIT
+CURRENT_BOOT=boot-current
+OWN_IDENTITY="boot-current:$$:999"
+printf 'boot-current:%s:123\\n' "$$" > "$LOCK/owner"
+process_start() { printf '123'; }
+acquire_lock && exit 91
+process_start() { printf '456'; }
+acquire_lock || exit 92
+[ "$(cat "$LOCK/owner")" = "$OWN_IDENTITY" ] || exit 93
+release_lock
+[ ! -e "$LOCK" ] || exit 94
+''')
+
+    def test_previous_boot_owner_cannot_block_current_boot(self):
+        self.run_case('''
+LOCK=$(mktemp -d)
+trap 'rm -rf "$LOCK"' EXIT
+CURRENT_BOOT=boot-current
+OWN_IDENTITY="boot-current:$$:999"
+printf 'boot-old:%s:123\\n' "$$" > "$LOCK/owner"
+process_start() { printf '123'; }
+acquire_lock || exit 91
+[ "$(cat "$LOCK/owner")" = "$OWN_IDENTITY" ] || exit 92
+''')
+
 if __name__ == '__main__':
     unittest.main()
+

@@ -91,20 +91,40 @@ recover() {
     return 0
 }
 
+process_start() {
+    raw_stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+    raw_stat=${raw_stat##*) }
+    set -- $raw_stat
+    [ "$#" -ge 20 ] || return 1
+    shift 19
+    printf '%s\n' "$1"
+}
+write_lock_owner() {
+    printf '%s\n' "$OWN_IDENTITY" > "$LOCK/owner" || { rmdir "$LOCK" 2>/dev/null; return 1; }
+}
 acquire_lock() {
-    if mkdir "$LOCK" 2>/dev/null; then printf '%s\n' "$$" > "$LOCK/pid"; return 0; fi
-    previous=$(cat "$LOCK/pid" 2>/dev/null)
-    case "$previous" in ''|*[!0-9]*) return 1 ;; esac
-    # A reused PID is conservatively treated as alive; never kill a process to acquire ownership.
-    kill -0 "$previous" 2>/dev/null && return 1
-    rm -f "$LOCK/pid"
+    if mkdir "$LOCK" 2>/dev/null; then write_lock_owner; return $?; fi
+    previous=$(cat "$LOCK/owner" 2>/dev/null)
+    previous_pid= previous_start= previous_boot=
+    IFS=: read -r previous_boot previous_pid previous_start <<EOF
+$previous
+EOF
+    case "$previous_pid:$previous_start" in ''|*[!0-9:]*|:*|*:) log "lock ownership unavailable; startup deferred"; return 1 ;; esac
+    if [ "$previous_boot" = "$CURRENT_BOOT" ] && kill -0 "$previous_pid" 2>/dev/null &&
+       [ "$(process_start "$previous_pid")" = "$previous_start" ]; then
+        log "supervisor already owns current-boot lock pid=$previous_pid"
+        return 1
+    fi
+    # Never kill a process to claim a stale lock. Recheck ownership before removing its record.
+    [ "$(cat "$LOCK/owner" 2>/dev/null)" = "$previous" ] || return 1
+    rm -f "$LOCK/owner"
     rmdir "$LOCK" 2>/dev/null || return 1
     mkdir "$LOCK" 2>/dev/null || return 1
-    printf '%s\n' "$$" > "$LOCK/pid"
+    write_lock_owner
 }
 release_lock() {
-    [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$$" ] || return
-    rm -f "$LOCK/pid"
+    [ "$(cat "$LOCK/owner" 2>/dev/null)" = "$OWN_IDENTITY" ] || return
+    rm -f "$LOCK/owner"
     rmdir "$LOCK" 2>/dev/null
 }
 
@@ -119,13 +139,21 @@ log "notification supervisor startup context=$(id)"
 [ "$(sha256sum /system/framework/services.jar | cut -d ' ' -f 1)" = e0e1e0a8ed7c887eddf4eec150845b99c7bacc245ac3024df3852364fe3a5a7e ] || { log "firmware gate rejected services.jar"; exit 0; }
 mkdir -p "$STATE_DIR"
 chmod 0700 "$STATE_DIR"
-acquire_lock || exit 0
+CURRENT_BOOT=$(cat /proc/sys/kernel/random/boot_id) || exit 1
+case "$CURRENT_BOOT" in ""|*[!0-9a-f-]*) log "invalid boot identity; startup refused"; exit 1 ;; esac
+LOCK="$STATE_DIR/notification-supervisor.$CURRENT_BOOT.lock"
+OWN_START=$(process_start "$$") || exit 1
+OWN_IDENTITY="$CURRENT_BOOT:$$:$OWN_START"
+acquire_lock || { log "notification supervisor did not acquire ownership"; exit 0; }
 trap release_lock EXIT
 trap 'exit 0' INT TERM
-CURRENT_BOOT=$(cat /proc/sys/kernel/random/boot_id)
-log "notification supervisor v1 started pid=$$"
+log "notification supervisor v2 started pid=$$ boot=$CURRENT_BOOT"
 failures=0
 while ! stopping; do
+    if [ "$(cat "$LOCK/owner" 2>/dev/null)" != "$OWN_IDENTITY" ]; then
+        log "supervisor lock identity changed; stopping duplicate owner"
+        exit 0
+    fi
     if ! enabled; then failures=0; sleep 60; continue; fi
     if healthy; then failures=0; sleep 20; continue; fi
     state=$(timeout 8 su 2000 -c 'am get-started-user-state 0' 2>/dev/null)
@@ -135,3 +163,4 @@ while ! stopping; do
     if [ "$failures" -ge 5 ]; then log "five unsuccessful recoveries; backing off 300s"; sleep 300; failures=0; else sleep 20; fi
 done
 log "notification supervisor stopped"
+
