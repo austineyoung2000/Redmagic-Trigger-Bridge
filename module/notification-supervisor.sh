@@ -57,8 +57,9 @@ binder_call() {
     # Values and ComponentName parcel layout verified from this exact uploaded firmware.
     output=$(timeout 8 su -c "su $uid -c 'service call notification $1 i32 1 s16 $PACKAGE s16 $COMPONENT'" 2>&1)
     status=$?
-    [ "$status" -eq 0 ] || { log "Binder transaction $1 failed status=$status response=$(printf '%s' \"$output\" | head -c 1200 | tr '\n' ' ')"; return 1; }
-    case "$output" in *"Parcel(00000000"*|*"Parcel( 00000000"*) return 0 ;; *) log "Binder transaction $1 lacked no-exception receipt response=$(printf '%s' \"$output\" | head -c 1200 | tr '\n' ' ')"; return 1 ;; esac
+    [ "$status" -eq 0 ] || { log "Binder transaction $1 failed status=$status response=$(printf '%s' "$output" | head -c 1200 | tr '\n' ' ')"; return 1; }
+    compact=$(printf '%s' "$output" | tr -d '[:space:]')
+    case "$compact" in *"Result:Parcel(00000000"*|*"Result:Parcel(0x00000000:00000000"*) return 0 ;; *) log "Binder transaction $1 lacked no-exception receipt response=$(printf '%s' "$output" | head -c 1200 | tr '\n' ' ')"; return 1 ;; esac
 }
 recover() {
     enabled && approved || return 1

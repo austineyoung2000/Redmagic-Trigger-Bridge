@@ -90,5 +90,19 @@ timeout() { printf 'Result: Parcel(00000000)'; return 0; }
 binder_call 83
 ''')
 
+    def test_variable_spacing_and_multiline_success_receipts(self):
+        self.run_case('''
+uid=10500
+for reply in "Result: Parcel(00000000 '....')" "Result: Parcel(    00000000    '....')" "Result:
+ Parcel(
+  0x00000000: 00000000 '....')"; do
+    timeout() { printf '%s' "$reply"; return 0; }
+    binder_call 83 || exit 91
+done
+reply="Result: Parcel(    fffffffc 00000000)"
+binder_call 83 && exit 92
+exit 0
+''')
+
 if __name__ == '__main__':
     unittest.main()
